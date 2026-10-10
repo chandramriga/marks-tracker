@@ -1,5 +1,7 @@
 <!DOCTYPE html>
-
+<!--
+LONG LIVE V. CHAND
+-->
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -229,8 +231,8 @@
             </div>
             <div>
               <label for="fRoll" class="label">Roll number</label>
-              <input id="fRoll" type="text" maxlength="20" inputmode="text" autocapitalize="characters" class="field" placeholder="Letters, digits, - or _" required />
-              <p class="mt-1 text-xs text-slate-500">Shown masked to others. Each roll number can be used once.</p>
+              <input id="fRoll" type="text" maxlength="12" inputmode="numeric" pattern="[0-9]{12}" autocomplete="off" class="field" placeholder="12-digit roll number" required />
+              <p class="mt-1 text-xs text-slate-500">Exactly 12 digits, numbers only. Shown masked to others. Each roll number can be used once.</p>
             </div>
             <div>
               <label for="fMarks" class="label">Raw marks</label>
@@ -628,7 +630,12 @@
     /* ------------------------------------------------------------------
        9. SUBMISSION FORM (create / edit / delete)
        ------------------------------------------------------------------ */
-    const ROLL_PATTERN = /^[A-Z0-9_-]{4,20}$/;
+    const ROLL_PATTERN = /^[0-9]{12}$/;   // HPRCA roll numbers are exactly 12 digits
+
+    // Allow only digits in the roll number field (also handles pasted text)
+    $('fRoll').addEventListener('input', (e) => {
+      e.target.value = e.target.value.replace(/\D/g, '').slice(0, 12);
+    });
 
     $('markForm').addEventListener('submit', async (ev) => {
       ev.preventDefault();
@@ -637,7 +644,7 @@
 
       const name = $('fName').value.trim();
       const category = $('fCategory').value;
-      const roll = $('fRoll').value.trim().toUpperCase();
+      const roll = $('fRoll').value.replace(/\s+/g, '');
       const shift = $('fShift').value;
       const marksRaw = $('fMarks').value;
       const marks = Number(marksRaw);
@@ -645,7 +652,7 @@
       // Client-side validation (Firestore rules re-check the important parts)
       if (name.length < 2 || name.length > 40) return showError(errEl, 'Enter a name or alias between 2 and 40 characters.');
       if (!CATEGORIES.includes(category)) return showError(errEl, 'Select your category.');
-      if (!ROLL_PATTERN.test(roll)) return showError(errEl, 'Roll number must be 4–20 characters: letters, digits, hyphen or underscore.');
+      if (!ROLL_PATTERN.test(roll)) return showError(errEl, 'Roll number must be exactly 12 digits (numbers only). Check it against your admit card.');
       if (!SHIFTS.some((s) => s.id === shift)) return showError(errEl, 'Select your exam date and shift.');
       if (marksRaw === '' || !Number.isFinite(marks)) return showError(errEl, 'Enter your raw marks.');
       if (marks < 0 || marks > MAX_MARKS) return showError(errEl, `Marks must be between 0 and ${MAX_MARKS}.`);
