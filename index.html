@@ -1,6 +1,8 @@
 <!DOCTYPE html>
 <!--
-LONG LIVE V. CHAND
+  ============================================================================
+LONG LIVE VCHAND
+  ----------------------------------------------------------------------------
 -->
 <html lang="en">
 <head>
@@ -118,15 +120,15 @@ LONG LIVE V. CHAND
           <ul class="mt-7 space-y-3 text-sm text-slate-300">
             <li class="flex gap-3">
               <svg class="h-5 w-5 text-saffron-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg>
-              One verified account, one entry. Roll numbers are checked for duplicates.
+              One account, one entry. Roll numbers are checked so nobody can be entered twice.
             </li>
             <li class="flex gap-3">
               <svg class="h-5 w-5 text-saffron-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-              Roll numbers are masked on the leaderboard. Only you can see yours in full.
+              Roll numbers are masked on the leaderboard.
             </li>
             <li class="flex gap-3">
               <svg class="h-5 w-5 text-saffron-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5"/></svg>
-              Numbers update live as more candidates submit.
+              Rankings are refreshed several times a day as more candidates submit.
             </li>
           </ul>
         </div>
@@ -180,9 +182,31 @@ LONG LIVE V. CHAND
           <h1 class="mt-1 text-2xl sm:text-3xl font-extrabold text-white tracking-tight">Marks and rank estimator</h1>
           <p class="mt-1.5 text-sm text-slate-400">HPRCA Junior Office Assistant (IT) · Post Code 26001 · Exams held 28 Sep to 1 Oct 2026</p>
         </div>
-        <span class="inline-flex items-center gap-2 rounded-full border border-ink-600 bg-ink-900 px-3 py-1.5 text-xs font-semibold text-slate-300">
-          <span class="h-2 w-2 rounded-full bg-emerald-400" aria-hidden="true"></span>Live data
-        </span>
+        <div class="flex items-center gap-2">
+          <span id="updatedPill" class="inline-flex items-center gap-2 rounded-full border border-ink-600 bg-ink-900 px-3 py-1.5 text-xs font-semibold text-slate-300">
+            <span class="h-2 w-2 rounded-full bg-slate-500" aria-hidden="true"></span><span id="updatedText">Not published yet</span>
+          </span>
+          <button id="refreshBtn" class="btn-ghost !py-1.5 !px-3 text-xs" aria-label="Refresh rankings">
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5"/></svg>
+            Refresh
+          </button>
+        </div>
+      </div>
+
+      <!-- Admin only -->
+      <div id="adminPanel" class="hidden panel p-5 !border-saffron-500/40">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <div class="max-w-2xl">
+            <h2 class="text-lg font-bold text-white">Admin: publish rankings</h2>
+            <p class="mt-1 text-sm text-slate-400">
+              Candidates see the numbers from the last published snapshot. Publishing reads only the entries
+              added since the previous publish, so it is cheap on the free plan.
+            </p>
+          </div>
+          <button id="publishBtn" class="btn-primary">Publish new entries</button>
+        </div>
+        <p id="adminLog" class="mt-3 text-sm text-slate-300" role="status"></p>
+        <button id="rebuildBtn" type="button" class="mt-2 text-xs text-slate-500 hover:text-slate-300 underline">Rebuild from scratch (reads every entry)</button>
       </div>
 
       <!-- Overview numbers -->
@@ -313,10 +337,14 @@ LONG LIVE V. CHAND
           </div>
         </div>
         <p class="mt-3 text-xs text-slate-500">
-          Rank in the first column is within the current filter. Candidates with equal marks share a rank.
-          Estimates come from voluntary submissions, not official results, so the real rank can differ.
+          The table lists the top entries for each filter. Your own rank, even if you are further down, is in
+          "Your estimated standing" above. Candidates with equal marks share a rank. Estimates come from
+          voluntary submissions, not official results, so the real rank can differ.
         </p>
       </div>
+
+      <!-- Shown only until ADMIN_UIDS is configured -->
+      <p id="adminHint" class="hidden text-xs text-slate-500 break-all"></p>
     </section>
 
     <!-- Loading state -->
@@ -353,7 +381,7 @@ LONG LIVE V. CHAND
        ==================================================================== -->
   <script type="module">
     /* ------------------------------------------------------------------
-       1. FIREBASE CONFIG — paste your own values here
+       1. FIREBASE CONFIG
        ------------------------------------------------------------------ */
     const firebaseConfig = {
       apiKey: "AIzaSyCZxWOQgRyX_c8_7G6oyARAoWDWc5ykpZg",
@@ -365,12 +393,10 @@ LONG LIVE V. CHAND
     };
 
     /* ------------------------------------------------------------------
-       2. EXAM CONFIG — edit to match the real exam
+       2. EXAM + APP CONFIG
        ------------------------------------------------------------------ */
-    const MAX_MARKS  = 120;                                   // maximum possible score
+    const MAX_MARKS  = 120;
     const CATEGORIES = ['General', 'EWS', 'OBC', 'SC', 'ST'];
-    // Exam schedule: 8 shifts over 4 days. Keep each id unique and stable
-    // (it is stored in Firestore). Do not rename ids after people have submitted.
     const SHIFTS = [
       { id: '0928S1', date: '28 Sep 2026', name: 'Shift 1' },
       { id: '0928S2', date: '28 Sep 2026', name: 'Shift 2' },
@@ -381,11 +407,20 @@ LONG LIVE V. CHAND
       { id: '1001S1', date: '1 Oct 2026',  name: 'Shift 1' },
       { id: '1001S2', date: '1 Oct 2026',  name: 'Shift 2' }
     ];
-    const MIN_RELIABLE = 5;   // shifts with fewer entries are labelled "Few entries"
-    const PAGE_SIZE    = 25;  // leaderboard rows per page
+
+    // Account IDs allowed to publish rankings. Paste your own (see setup notes at the top).
+    // The same ID must also be in the isAdmin() function of your Firestore rules.
+    const ADMIN_UIDS = ['PASTE_ADMIN_UID_HERE'];
+
+    const TOP_N          = 100;              // rows kept per filter in the snapshot
+    const MIN_RELIABLE   = 5;                // shifts with fewer entries are labelled "Few entries"
+    const PAGE_SIZE      = 25;               // leaderboard rows revealed per click
+    const SNAP_TTL_MS    = 10 * 60 * 1000;   // browsers reuse the snapshot for 10 minutes (saves reads)
+    const MIN_REFRESH_MS = 2 * 60 * 1000;    // minimum gap between manual refreshes
+    const MINE_TTL_MS    = 24 * 60 * 60 * 1000;
 
     /* ------------------------------------------------------------------
-       3. IMPORTS (Firebase v10 modular SDK from the official CDN)
+       3. IMPORTS (Firebase v10 modular SDK)
        ------------------------------------------------------------------ */
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
     import {
@@ -394,21 +429,30 @@ LONG LIVE V. CHAND
       updateProfile, signOut, sendPasswordResetEmail
     } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
     import {
-      getFirestore, collection, doc, getDoc, onSnapshot, runTransaction, serverTimestamp
+      getFirestore, doc, getDoc, setDoc, writeBatch, collection, query, where,
+      orderBy, limit, getDocs, serverTimestamp, Timestamp
     } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
     /* ------------------------------------------------------------------
        4. HELPERS
        ------------------------------------------------------------------ */
     const $ = (id) => document.getElementById(id);
+    const SHIFT_IDS = SHIFTS.map((s) => s.id);
     const shiftLabel = (id) => {
       const s = SHIFTS.find((x) => x.id === id);
       return s ? `${s.date}, ${s.name}` : id;
     };
-    const fmt = (n) => (Number.isInteger(n) ? String(n) : n.toFixed(2));
+    const round2 = (n) => Math.round(n * 100) / 100;
+    const fmt = (n) => (Number.isInteger(n) ? String(n) : round2(n).toFixed(2));
     const escapeHtml = (str) =>
       String(str).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-    const maskRoll = (roll) => (roll.length > 3 ? '•'.repeat(roll.length - 3) + roll.slice(-3) : roll);
+    const maskRoll = (roll) => '•'.repeat(roll.length - 3) + roll.slice(-3);
+
+    // Small localStorage helpers (failures are ignored: private mode, quota, etc.)
+    const lsGet = (k) => { try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } };
+    const lsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* ignore */ } };
+    const LS_SNAP = 'heh_joa26001_snapshot';
+    const LS_MINE = 'heh_joa26001_mine_';
 
     let toastTimer;
     function toast(message, type = 'success') {
@@ -417,7 +461,7 @@ LONG LIVE V. CHAND
       el.className = 'fixed bottom-5 left-1/2 -translate-x-1/2 z-50 max-w-[92vw] rounded-lg px-4 py-3 text-sm font-semibold shadow-xl ' +
         (type === 'error' ? 'bg-red-600 text-white' : 'bg-emerald-600 text-white');
       clearTimeout(toastTimer);
-      toastTimer = setTimeout(() => el.classList.add('hidden'), 4000);
+      toastTimer = setTimeout(() => el.classList.add('hidden'), 4500);
     }
     function showError(el, msg) { el.textContent = msg; el.classList.remove('hidden'); }
     function hideError(el) { el.classList.add('hidden'); el.textContent = ''; }
@@ -436,9 +480,9 @@ LONG LIVE V. CHAND
     const CONFIGURED = firebaseConfig.apiKey && firebaseConfig.apiKey !== 'YOUR_API_KEY';
     let auth, db;
     let currentUser = null;
-    let allSubs = [];            // every submission (live)
-    let myRoll = '';             // my full roll number (private doc)
-    let unsubscribe = null;
+    let snap = null;              // the published snapshot (parsed), or null
+    let mine = null;              // this user's own submission, or null
+    let lastServerFetch = 0;
     let visibleRows = PAGE_SIZE;
 
     if (CONFIGURED) {
@@ -448,14 +492,14 @@ LONG LIVE V. CHAND
     } else {
       $('configBanner').classList.remove('hidden');
     }
+    const isAdmin = () => !!currentUser && ADMIN_UIDS.includes(currentUser.uid);
 
     /* ------------------------------------------------------------------
        6. STATIC UI SETUP (dropdowns)
        ------------------------------------------------------------------ */
     function buildShiftOptions(select, withAll = false) {
       select.innerHTML = '';
-      if (withAll) select.add(new Option('All shifts', ''));
-      else select.add(new Option('Select date and shift', ''));
+      select.add(new Option(withAll ? 'All shifts' : 'Select date and shift', ''));
       SHIFTS.forEach((s) => select.add(new Option(`${s.date}, ${s.name}`, s.id)));
     }
     CATEGORIES.forEach((c) => $('fCategory').add(new Option(c, c)));
@@ -470,7 +514,7 @@ LONG LIVE V. CHAND
     /* ------------------------------------------------------------------
        7. AUTHENTICATION
        ------------------------------------------------------------------ */
-    let authMode = 'signin'; // or 'signup'
+    let authMode = 'signin';
 
     function setAuthMode(mode) {
       authMode = mode;
@@ -534,7 +578,7 @@ LONG LIVE V. CHAND
         if (authMode === 'signup') {
           const cred = await createUserWithEmailAndPassword(auth, email, pass);
           await updateProfile(cred.user, { displayName: name });
-          renderNavUser(cred.user);  // refresh name in navbar
+          renderNavUser(cred.user);
         } else {
           await signInWithEmailAndPassword(auth, email, pass);
         }
@@ -577,7 +621,6 @@ LONG LIVE V. CHAND
       }
     }
 
-    // Single source of truth for the signed-in / signed-out UI
     if (CONFIGURED) {
       onAuthStateChanged(auth, async (user) => {
         currentUser = user;
@@ -585,12 +628,12 @@ LONG LIVE V. CHAND
           renderNavUser(user);
           showView('app');
           $('fName').value = $('fName').value || user.displayName || '';
-          await loadMyPrivate();
-          startListening();
+          // Two small reads at most: the snapshot (cached) and the user's own entry (cached)
+          await Promise.all([loadSnapshot(false), loadMine(false)]);
+          renderAll();
         } else {
-          stopListening();
-          allSubs = [];
-          myRoll = '';
+          snap = null;
+          mine = null;
           $('markForm').reset();
           showView('auth');
         }
@@ -600,47 +643,84 @@ LONG LIVE V. CHAND
     }
 
     /* ------------------------------------------------------------------
-       8. FIRESTORE — live data
+       8. DATA LOADING (cheap on purpose: snapshot + own entry)
        ------------------------------------------------------------------ */
-    function startListening() {
-      stopListening();
-      unsubscribe = onSnapshot(
-        collection(db, 'submissions'),
-        (snap) => {
-          allSubs = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-          renderAll();
-        },
-        (err) => {
-          console.error(err);
-          toast(err.code === 'permission-denied'
-            ? 'Permission denied. Check your Firestore security rules.'
-            : 'Could not load live data. Check your connection.', 'error');
-        }
-      );
-    }
-    function stopListening() { if (unsubscribe) { unsubscribe(); unsubscribe = null; } }
-
-    async function loadMyPrivate() {
+    async function loadSnapshot(force) {
+      const cached = lsGet(LS_SNAP);
+      const fresh = cached && Date.now() - cached.fetchedAt < SNAP_TTL_MS;
+      if (!force && fresh) {
+        snap = cached.state;
+        lastServerFetch = cached.fetchedAt;
+        return;
+      }
       try {
-        const snap = await getDoc(doc(db, 'private', currentUser.uid));
-        myRoll = snap.exists() ? snap.data().roll : '';
-      } catch (e) { console.error(e); }
+        const d = await getDoc(doc(db, 'snapshots', 'latest'));
+        snap = d.exists() ? JSON.parse(d.data().data) : null;
+        lastServerFetch = Date.now();
+        if (snap) lsSet(LS_SNAP, { fetchedAt: lastServerFetch, state: snap });
+      } catch (e) {
+        console.error(e);
+        if (cached) {
+          snap = cached.state;
+          toast('Showing the last saved numbers. The server could not be reached.', 'error');
+        } else if (e.code === 'resource-exhausted') {
+          toast('The daily free limit was reached. Please try again later today.', 'error');
+        } else {
+          toast('Could not load the rankings. Check your connection.', 'error');
+        }
+      }
     }
+
+    async function loadMine(force) {
+      const uid = currentUser.uid;
+      const cached = lsGet(LS_MINE + uid);
+      if (!force && cached && Date.now() - cached.t < MINE_TTL_MS) { mine = cached.v; return; }
+      try {
+        const d = await getDoc(doc(db, 'submissions', uid));
+        if (d.exists()) {
+          const x = d.data();
+          mine = { name: x.name, category: x.category, shift: x.shift, marks: x.marks, rollMasked: x.rollMasked };
+          lsSet(LS_MINE + uid, { t: Date.now(), v: mine });
+        } else {
+          mine = null;
+        }
+      } catch (e) {
+        console.error(e);
+        if (cached) mine = cached.v;
+      }
+    }
+
+    $('refreshBtn').addEventListener('click', async () => {
+      if (Date.now() - lastServerFetch < MIN_REFRESH_MS) {
+        return toast('Already up to date. Rankings change when new entries are published.');
+      }
+      $('refreshBtn').disabled = true;
+      await loadSnapshot(true);
+      renderAll();
+      $('refreshBtn').disabled = false;
+    });
 
     /* ------------------------------------------------------------------
-       9. SUBMISSION FORM (create / edit / delete)
+       9. SUBMISSION (create-only; zero reads)
        ------------------------------------------------------------------ */
     const ROLL_PATTERN = /^[0-9]{12}$/;   // HPRCA roll numbers are exactly 12 digits
 
-    // Allow only digits in the roll number field (also handles pasted text)
     $('fRoll').addEventListener('input', (e) => {
       e.target.value = e.target.value.replace(/\D/g, '').slice(0, 12);
     });
+
+    // Works out why a write was refused (only runs after a failure)
+    async function diagnose(uid, roll) {
+      try { if ((await getDoc(doc(db, 'submissions', uid))).exists()) return 'ALREADY'; } catch { /* ignore */ }
+      try { if ((await getDoc(doc(db, 'rolls', roll))).exists()) return 'ROLL_TAKEN'; } catch { /* ignore */ }
+      return 'RULES';
+    }
 
     $('markForm').addEventListener('submit', async (ev) => {
       ev.preventDefault();
       const errEl = $('formError');
       hideError(errEl);
+      if (mine) return showError(errEl, 'You have already submitted. Entries cannot be changed.');
 
       const name = $('fName').value.trim();
       const category = $('fCategory').value;
@@ -649,58 +729,57 @@ LONG LIVE V. CHAND
       const marksRaw = $('fMarks').value;
       const marks = Number(marksRaw);
 
-      // Client-side validation (Firestore rules re-check the important parts)
       if (name.length < 2 || name.length > 40) return showError(errEl, 'Enter a name or alias between 2 and 40 characters.');
       if (!CATEGORIES.includes(category)) return showError(errEl, 'Select your category.');
       if (!ROLL_PATTERN.test(roll)) return showError(errEl, 'Roll number must be exactly 12 digits (numbers only). Check it against your admit card.');
-      if (!SHIFTS.some((s) => s.id === shift)) return showError(errEl, 'Select your exam date and shift.');
+      if (!SHIFT_IDS.includes(shift)) return showError(errEl, 'Select your exam date and shift.');
       if (marksRaw === '' || !Number.isFinite(marks)) return showError(errEl, 'Enter your raw marks.');
       if (marks < 0 || marks > MAX_MARKS) return showError(errEl, `Marks must be between 0 and ${MAX_MARKS}.`);
-
-      if (allSubs.some((s) => s.id === currentUser.uid)) return showError(errEl, 'You have already submitted. Entries cannot be changed.');
       if (!confirm('Submit these details?\n\nOnce submitted, your entry cannot be edited or deleted.')) return;
 
       const uid = currentUser.uid;
       const btn = $('saveBtn');
       btn.disabled = true;
-
       try {
-        await runTransaction(db, async (tx) => {
-          const rollRef = doc(db, 'rolls', roll);
-          const privRef = doc(db, 'private', uid);
-          const subRef  = doc(db, 'submissions', uid);
-
-          // All reads first
-          const subSnap  = await tx.get(subRef);
-          const rollSnap = await tx.get(rollRef);
-
-          if (subSnap.exists()) throw new Error('ALREADY_SUBMITTED');   // one entry per account
-          if (rollSnap.exists()) throw new Error('ROLL_TAKEN');         // roll number already used
-
-          // Writes (create-only: the security rules block any later update or delete)
-          tx.set(rollRef, { uid });
-          tx.set(privRef, { roll });
-          tx.set(subRef, {
-            uid, name, category, shift, marks,
-            rollMasked: maskRoll(roll),
-            updatedAt: serverTimestamp()
-          });
+        // One atomic batch: the roll-number lock + the entry. If the roll number or the
+        // account already exists, the security rules reject the whole batch.
+        const batch = writeBatch(db);
+        batch.set(doc(db, 'rolls', roll), { uid });
+        batch.set(doc(db, 'submissions', uid), {
+          uid, name, category, shift, marks,
+          rollMasked: maskRoll(roll),
+          updatedAt: serverTimestamp()
         });
-        myRoll = roll;
-        toast('Marks submitted. Thank you!');
+        await batch.commit();
+
+        mine = { name, category, shift, marks: round2(marks) === marks ? marks : round2(marks), rollMasked: maskRoll(roll) };
+        lsSet(LS_MINE + uid, { t: Date.now(), v: mine });
+        renderAll();
+        toast('Marks submitted. Your entry appears in the rankings at the next update.');
       } catch (e) {
         console.error(e);
-        if (e.message === 'ROLL_TAKEN') showError(errEl, 'This roll number is already registered by another account. Check for typos.');
-        else if (e.message === 'ALREADY_SUBMITTED') showError(errEl, 'You have already submitted. Entries cannot be changed.');
-        else if (e.code === 'permission-denied') showError(errEl, 'Permission denied. Publish the Firestore security rules from the top of this file.');
-        else showError(errEl, 'Could not save your entry. Check your connection and try again.');
+        if (e.code === 'resource-exhausted') {
+          showError(errEl, 'The free daily limit was reached. Please try again later today (it resets once a day).');
+        } else if (e.code === 'permission-denied') {
+          const why = await diagnose(uid, roll);
+          if (why === 'ALREADY') {
+            await loadMine(true); renderAll();
+            showError(errEl, 'You have already submitted. Entries cannot be changed.');
+          } else if (why === 'ROLL_TAKEN') {
+            showError(errEl, 'This roll number is already registered by another account. Check for typos.');
+          } else {
+            showError(errEl, 'Permission denied. Publish the Firestore security rules from the top of this file.');
+          }
+        } else {
+          showError(errEl, 'Could not save your entry. Check your connection and try again.');
+        }
       } finally {
         btn.disabled = false;
       }
     });
 
     // After submitting, the form becomes a locked, read-only record of the entry
-    function syncForm(mine) {
+    function syncForm() {
       const locked = !!mine;
       $('formBadge').classList.toggle('hidden', !locked);
       $('saveBtn').classList.toggle('hidden', locked);
@@ -714,79 +793,244 @@ LONG LIVE V. CHAND
         $('fCategory').value = mine.category;
         $('fShift').value = mine.shift;
         $('fMarks').value = mine.marks;
-        $('fRoll').value = myRoll || mine.rollMasked || '';
+        $('fRoll').value = mine.rollMasked || '';
       }
     }
 
     /* ------------------------------------------------------------------
-       10. ANALYTICS + RENDERING
+       10. SNAPSHOT MATHS
        ------------------------------------------------------------------ */
-    // Competition ranking: 1 + number of entries with strictly higher marks.
-    function rankIn(list, marks) { return 1 + list.filter((s) => s.marks > marks).length; }
+    // Marks are bucketed to 0.01 so histograms stay small: key = round(marks * 100).
+    const markKey = (m) => String(Math.round(m * 100));
+    const bump = (obj, key) => { obj[key] = (obj[key] || 0) + 1; };
+    const histOf = (st, name) => (st.h[name] = st.h[name] || {});
 
+    // Number of entries scoring strictly more than `marks` in a histogram
+    function countAbove(hist, marks) {
+      if (!hist) return 0;
+      const m = Math.round(marks * 100);
+      let c = 0;
+      for (const k in hist) if (Number(k) > m) c += hist[k];
+      return c;
+    }
+
+    function emptyState() {
+      return { v: 1, t: 0, n: 0, sum: 0, max: 0, skipped: 0, topN: TOP_N, cursor: null,
+               shift: {}, cat: {}, h: { all: {} }, lists: {} };
+    }
+
+    // Folds ONE entry into the snapshot (entries are immutable, so this is purely additive)
+    function addEntry(st, id, d, touched) {
+      const marks = d.marks;
+      if (typeof marks !== 'number' || !isFinite(marks) || marks < 0 || marks > MAX_MARKS ||
+          !CATEGORIES.includes(d.category) || !SHIFT_IDS.includes(d.shift) || typeof d.name !== 'string') {
+        st.skipped++;           // e.g. an old test entry with a shift ID that no longer exists
+        return;
+      }
+      const key = markKey(marks);
+      st.n++; st.sum += marks; st.max = Math.max(st.max, marks);
+
+      const sh = (st.shift[d.shift] = st.shift[d.shift] || { n: 0, sum: 0, max: 0 });
+      sh.n++; sh.sum += marks; sh.max = Math.max(sh.max, marks);
+      st.cat[d.category] = (st.cat[d.category] || 0) + 1;
+
+      bump(st.h.all, key);
+      bump(histOf(st, 'c:' + d.category), key);
+      bump(histOf(st, 's:' + d.shift), key);
+
+      const row = [d.name.slice(0, 40), d.rollMasked || '', d.category, d.shift, marks, id.slice(0, 10)];
+      [`*|*`, `${d.category}|*`, `*|${d.shift}`, `${d.category}|${d.shift}`].forEach((lk) => {
+        (st.lists[lk] = st.lists[lk] || []).push(row);
+        touched.add(lk);
+      });
+    }
+
+    /* ------------------------------------------------------------------
+       11. ADMIN: PUBLISH SNAPSHOT (incremental)
+       ------------------------------------------------------------------ */
+    async function publishSnapshot(rebuild) {
+      let reads = 0;
+      let st = emptyState();
+      if (!rebuild) {
+        const prev = await getDoc(doc(db, 'snapshots', 'latest'));
+        reads++;
+        if (prev.exists()) st = JSON.parse(prev.data().data);
+      }
+
+      const col = collection(db, 'submissions');
+      const touched = new Set();
+      let added = 0;
+
+      // Walk entries in order of creation time, starting where the last publish stopped.
+      for (;;) {
+        const cons = [];
+        if (st.cursor) cons.push(where('updatedAt', '>=', new Timestamp(st.cursor.s, st.cursor.n)));
+        cons.push(orderBy('updatedAt'), limit(500));
+        const qs = await getDocs(query(col, ...cons));
+        reads += qs.size;
+
+        let progressed = 0;
+        for (const d of qs.docs) {
+          const data = d.data();
+          const ts = data.updatedAt;
+          if (!ts || typeof ts.seconds !== 'number') continue;
+          if (st.cursor && ts.seconds === st.cursor.s && ts.nanoseconds === st.cursor.n) {
+            if (st.cursor.seen.includes(d.id)) continue;       // already counted
+            st.cursor.seen.push(d.id);
+          } else {
+            st.cursor = { s: ts.seconds, n: ts.nanoseconds, seen: [d.id] };
+          }
+          addEntry(st, d.id, data, touched);
+          added++; progressed++;
+        }
+        if (qs.size < 500 || progressed === 0) break;
+      }
+
+      // Keep only the top rows per list
+      touched.forEach((lk) => {
+        st.lists[lk].sort((a, b) => b[4] - a[4] || String(a[0]).localeCompare(String(b[0])));
+        st.lists[lk] = st.lists[lk].slice(0, st.topN);
+      });
+
+      st.t = Date.now();
+      let json = JSON.stringify(st);
+      // Firestore documents are limited to 1 MiB: shrink the lists if ever needed
+      while (new Blob([json]).size > 900000 && st.topN > 20) {
+        st.topN = Math.floor(st.topN * 0.7);
+        for (const lk in st.lists) st.lists[lk] = st.lists[lk].slice(0, st.topN);
+        json = JSON.stringify(st);
+      }
+
+      await setDoc(doc(db, 'snapshots', 'latest'), { data: json, n: st.n, updatedAt: serverTimestamp() });
+      return { st, added, reads };
+    }
+
+    async function runPublish(rebuild) {
+      if (!isAdmin()) return;
+      if (rebuild && !confirm('Rebuild reads EVERY entry once. With thousands of entries this uses a large part of the daily free reads. Continue?')) return;
+      const btn = $('publishBtn');
+      const log = $('adminLog');
+      btn.disabled = true;
+      $('rebuildBtn').disabled = true;
+      log.textContent = 'Publishing…';
+      try {
+        const { st, added, reads } = await publishSnapshot(rebuild);
+        snap = st;
+        lastServerFetch = Date.now();
+        lsSet(LS_SNAP, { fetchedAt: lastServerFetch, state: snap });
+        log.textContent = `Published ${st.n} entries (${added} new, about ${reads} reads used).` +
+          (st.skipped ? ` ${st.skipped} entries were skipped as invalid (for example an old shift ID).` : '');
+        renderAll();
+      } catch (e) {
+        console.error(e);
+        log.textContent = e.code === 'permission-denied'
+          ? 'Permission denied. Check that your account ID is in ADMIN_UIDS and in the isAdmin() rule, and that the rules are published.'
+          : e.code === 'resource-exhausted'
+            ? 'The free daily limit was reached. Try again after it resets (once a day).'
+            : 'Publishing failed: ' + (e.message || 'unknown error');
+      } finally {
+        btn.disabled = false;
+        $('rebuildBtn').disabled = false;
+      }
+    }
+    $('publishBtn').addEventListener('click', () => runPublish(false));
+    $('rebuildBtn').addEventListener('click', () => runPublish(true));
+
+    /* ------------------------------------------------------------------
+       12. RENDERING
+       ------------------------------------------------------------------ */
     function renderAll() {
-      const mine = allSubs.find((s) => s.id === currentUser?.uid);
+      renderPill();
+      renderAdmin();
       renderStats();
-      renderMyStanding(mine);
+      renderMyStanding();
       renderShiftCards();
       renderBoard();
-      syncForm(mine);
+      syncForm();
+    }
+
+    function renderPill() {
+      const dot = $('updatedPill').firstElementChild;
+      if (!snap) {
+        $('updatedText').textContent = 'Not published yet';
+        dot.className = 'h-2 w-2 rounded-full bg-slate-500';
+        return;
+      }
+      const when = new Date(snap.t).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' });
+      $('updatedText').textContent = `Updated ${when}`;
+      dot.className = 'h-2 w-2 rounded-full bg-emerald-400';
+    }
+
+    function renderAdmin() {
+      $('adminPanel').classList.toggle('hidden', !isAdmin());
+      if (isAdmin() && !$('adminLog').textContent) {
+        $('adminLog').textContent = snap
+          ? `Last published ${snap.n} entries.`
+          : 'Nothing published yet. Click "Publish new entries" to create the first snapshot.';
+      }
+      const hint = $('adminHint');
+      const unset = ADMIN_UIDS.includes('PASTE_ADMIN_UID_HERE');
+      hint.classList.toggle('hidden', !unset);
+      if (unset && currentUser) hint.textContent = `Admin setup: your account ID is ${currentUser.uid}`;
     }
 
     function renderStats() {
-      const n = allSubs.length;
-      $('statTotal').textContent = n;
-      $('statAvg').textContent = n ? fmt(Math.round((allSubs.reduce((a, s) => a + s.marks, 0) / n) * 100) / 100) : '–';
-      $('statTop').textContent = n ? fmt(Math.max(...allSubs.map((s) => s.marks))) : '–';
+      $('statTotal').textContent = snap ? snap.n : '–';
+      $('statAvg').textContent = snap && snap.n ? fmt(snap.sum / snap.n) : '–';
+      $('statTop').textContent = snap && snap.n ? fmt(snap.max) : '–';
     }
 
-    function renderMyStanding(mine) {
+    function renderMyStanding() {
       const box = $('myStanding');
       if (!mine) {
         box.innerHTML = `<p class="text-sm text-slate-400">Submit your marks to see your estimated overall rank, category rank and percentile.</p>`;
         return;
       }
-      const n = allSubs.length;
-      const overall = rankIn(allSubs, mine.marks);
-      const catList = allSubs.filter((s) => s.category === mine.category);
-      const catRank = rankIn(catList, mine.marks);
-      const shiftList = allSubs.filter((s) => s.shift === mine.shift);
-      const shiftAvg = shiftList.reduce((a, s) => a + s.marks, 0) / shiftList.length;
-      const topPct = Math.max(1, Math.round((overall / n) * 100));
-      const diff = mine.marks - shiftAvg;
+      if (!snap || !snap.n) {
+        box.innerHTML = `<p class="text-sm text-slate-300">Your entry is saved. Rank estimates will appear once the first rankings are published.</p>`;
+        return;
+      }
+      const overall = 1 + countAbove(snap.h.all, mine.marks);
+      const catRank = 1 + countAbove(snap.h['c:' + mine.category], mine.marks);
+      const catN = snap.cat[mine.category] || 0;
+      const sh = snap.shift[mine.shift];
+      const topPct = Math.max(1, Math.round((overall / Math.max(snap.n, overall)) * 100));
+
+      let diffLine = '';
+      if (sh && sh.n) {
+        const diff = round2(mine.marks - sh.sum / sh.n);
+        diffLine = `<p class="mt-4 text-sm text-slate-300">
+          You scored <strong class="${diff >= 0 ? 'text-emerald-300' : 'text-red-300'}">${diff >= 0 ? '+' : ''}${fmt(diff)}</strong>
+          against the average of your shift (${escapeHtml(shiftLabel(mine.shift))}).</p>`;
+      }
 
       box.innerHTML = `
         <div class="flex items-baseline gap-2">
           <span class="text-5xl font-extrabold text-white">${overall}</span>
-          <span class="text-slate-400">of ${n} overall</span>
+          <span class="text-slate-400">of ${Math.max(snap.n, overall)} overall</span>
         </div>
-        <p class="mt-1 text-sm text-saffron-400 font-semibold">Top ${topPct}% of submissions</p>
+        <p class="mt-1 text-sm text-saffron-400 font-semibold">Top ${topPct}% of published submissions</p>
         <dl class="mt-5 grid grid-cols-2 gap-3 text-sm">
           <div class="rounded-lg bg-ink-950 border border-ink-700 p-3">
             <dt class="text-slate-400">${escapeHtml(mine.category)} rank</dt>
-            <dd class="mt-0.5 text-lg font-bold text-white">${catRank} <span class="text-sm font-medium text-slate-400">of ${catList.length}</span></dd>
+            <dd class="mt-0.5 text-lg font-bold text-white">${catRank} <span class="text-sm font-medium text-slate-400">of ${Math.max(catN, catRank)}</span></dd>
           </div>
           <div class="rounded-lg bg-ink-950 border border-ink-700 p-3">
             <dt class="text-slate-400">Your marks</dt>
             <dd class="mt-0.5 text-lg font-bold text-white">${fmt(mine.marks)} <span class="text-sm font-medium text-slate-400">/ ${MAX_MARKS}</span></dd>
           </div>
         </dl>
-        <p class="mt-4 text-sm text-slate-300">
-          You scored <strong class="${diff >= 0 ? 'text-emerald-300' : 'text-red-300'}">${diff >= 0 ? '+' : ''}${fmt(Math.round(diff * 100) / 100)}</strong>
-          against the average of your shift (${escapeHtml(shiftLabel(mine.shift))}).
-        </p>`;
+        ${diffLine}`;
     }
 
     function renderShiftCards() {
-      const overallAvg = allSubs.length ? allSubs.reduce((a, s) => a + s.marks, 0) / allSubs.length : 0;
-      const html = SHIFTS.map((sh) => {
-        const list = allSubs.filter((s) => s.shift === sh.id);
-        const n = list.length;
-        const avg = n ? list.reduce((a, s) => a + s.marks, 0) / n : 0;
-        const best = n ? Math.max(...list.map((s) => s.marks)) : 0;
+      const overallAvg = snap && snap.n ? snap.sum / snap.n : 0;
+      $('shiftCards').innerHTML = SHIFTS.map((s) => {
+        const st = (snap && snap.shift[s.id]) || { n: 0, sum: 0, max: 0 };
+        const n = st.n;
+        const avg = n ? st.sum / n : 0;
         const pct = Math.min(100, (avg / MAX_MARKS) * 100);
 
-        // Difficulty badge, relative to the all-shift average (±3% of max marks counts as moderate)
         let badge = '<span class="chip bg-ink-700 text-slate-300">No data</span>';
         if (n > 0 && n < MIN_RELIABLE) {
           badge = '<span class="chip bg-ink-700 text-slate-300">Few entries</span>';
@@ -796,69 +1040,65 @@ LONG LIVE V. CHAND
                 : delta >  band ? '<span class="chip bg-emerald-500/15 text-emerald-300">Easier</span>'
                                 : '<span class="chip bg-saffron-500/15 text-saffron-400">Moderate</span>';
         }
-
-        // Marker for the all-shift average on the bar
         const avgMark = Math.min(100, (overallAvg / MAX_MARKS) * 100);
 
         return `
           <article class="panel p-5">
             <div class="flex items-start justify-between gap-2">
               <div>
-                <h3 class="font-bold text-white">${escapeHtml(sh.name)}</h3>
-                <p class="text-sm text-slate-400">${escapeHtml(sh.date)}</p>
+                <h3 class="font-bold text-white">${escapeHtml(s.name)}</h3>
+                <p class="text-sm text-slate-400">${escapeHtml(s.date)}</p>
               </div>
               ${badge}
             </div>
-            <div class="mt-4 flex items-end justify-between">
+            <div class="mt-4 flex items-end justify-between gap-2">
               <div>
-                <p class="text-3xl font-extrabold text-white">${n ? fmt(Math.round(avg * 100) / 100) : '–'}</p>
+                <p class="text-3xl font-extrabold text-white">${n ? fmt(avg) : '–'}</p>
                 <p class="text-xs text-slate-400">average marks</p>
               </div>
               <div class="text-right text-sm text-slate-300">
                 <p><span class="font-bold text-white">${n}</span> submission${n === 1 ? '' : 's'}</p>
-                <p class="text-slate-400">Highest ${n ? fmt(best) : '–'}</p>
+                <p class="text-slate-400">Highest ${n ? fmt(st.max) : '–'}</p>
               </div>
             </div>
-            <div class="relative mt-4 h-2.5 rounded-full bg-ink-950 border border-ink-700 overflow-visible" role="img"
-                 aria-label="Average ${n ? fmt(Math.round(avg * 100) / 100) : 0} out of ${MAX_MARKS}">
+            <div class="relative mt-4 h-2.5 rounded-full bg-ink-950 border border-ink-700" role="img"
+                 aria-label="Average ${n ? fmt(avg) : 0} out of ${MAX_MARKS}">
               <div class="bar-fill h-full rounded-full bg-brand-500" style="width:${pct}%"></div>
-              ${n && allSubs.length ? `<span class="absolute -top-1 h-4.5 w-0.5 bg-saffron-400" style="left:${avgMark}%;height:18px" title="All-shift average"></span>` : ''}
+              ${n ? `<span class="absolute -top-1 w-0.5 bg-saffron-400" style="left:${avgMark}%;height:18px" title="All-shift average"></span>` : ''}
             </div>
             <p class="mt-2 text-xs text-slate-500">Orange tick: average across all shifts</p>
           </article>`;
       }).join('');
-      $('shiftCards').innerHTML = html;
     }
 
     function renderBoard() {
       const cat = $('filterCategory').value;
       const sh = $('filterShift').value;
+      const list = (snap && snap.lists[`${cat || '*'}|${sh || '*'}`]) || [];
+      const myKey = currentUser ? currentUser.uid.slice(0, 10) : '';
 
-      // Overall ranks come from the full data set so they stay stable under filters
-      const overallRankOf = (m) => rankIn(allSubs, m);
-
-      const filtered = allSubs
-        .filter((s) => (!cat || s.category === cat) && (!sh || s.shift === sh))
-        .sort((a, b) => b.marks - a.marks || String(a.name).localeCompare(String(b.name)));
-
-      $('boardSummary').textContent = `${filtered.length} of ${allSubs.length} entries shown, highest marks first.`;
+      $('boardSummary').textContent = snap
+        ? `Top ${list.length} entries for this filter, highest marks first.`
+        : 'Rankings have not been published yet.';
 
       const body = $('boardBody');
       const empty = $('boardEmpty');
-      if (!filtered.length) {
+      if (!list.length) {
         body.innerHTML = '';
         empty.classList.remove('hidden');
-        empty.textContent = allSubs.length
-          ? 'No entries match these filters. Try choosing "All categories" or "All shifts".'
-          : 'No one has submitted yet. Add your marks to get things started.';
+        empty.textContent = !snap
+          ? 'Rankings have not been published yet. Check back soon.'
+          : (snap.n ? 'No entries match these filters yet. Try "All categories" or "All shifts".' : 'No entries published yet.');
         $('boardMore').classList.add('hidden');
         return;
       }
       empty.classList.add('hidden');
 
-      const rows = filtered.slice(0, visibleRows).map((s) => {
-        const rank = rankIn(filtered, s.marks);
-        const isMe = s.id === currentUser?.uid;
+      body.innerHTML = list.slice(0, visibleRows).map((r) => {
+        const [name, roll, category, shift, marks, key] = r;
+        const rank = 1 + list.filter((x) => x[4] > marks).length;      // rank within this filter
+        const overall = 1 + countAbove(snap.h.all, marks);             // rank among everyone
+        const isMe = key === myKey;
         const rankChip = rank <= 3
           ? `<span class="inline-grid place-items-center h-7 w-7 rounded-full text-xs font-extrabold ${rank === 1 ? 'bg-saffron-400 text-slate-900' : rank === 2 ? 'bg-slate-300 text-slate-900' : 'bg-amber-700 text-white'}">${rank}</span>`
           : `<span class="font-semibold text-slate-200">${rank}</span>`;
@@ -866,19 +1106,18 @@ LONG LIVE V. CHAND
           <tr class="${isMe ? 'bg-brand-500/10' : 'hover:bg-ink-800/60'}">
             <td class="px-4 py-3">${rankChip}</td>
             <td class="px-4 py-3">
-              <span class="font-semibold text-white">${escapeHtml(s.name)}</span>
+              <span class="font-semibold text-white">${escapeHtml(name)}</span>
               ${isMe ? '<span class="chip ml-2 bg-brand-500/20 text-brand-400">You</span>' : ''}
-              <span class="block text-xs text-slate-500">Roll ${escapeHtml(s.rollMasked || '')}</span>
-              <span class="block md:hidden text-xs text-slate-400">${escapeHtml(shiftLabel(s.shift))}</span>
+              <span class="block text-xs text-slate-500">Roll ${escapeHtml(roll)}</span>
+              <span class="block md:hidden text-xs text-slate-400">${escapeHtml(shiftLabel(shift))}</span>
             </td>
-            <td class="px-4 py-3"><span class="chip bg-ink-700 text-slate-200">${escapeHtml(s.category)}</span></td>
-            <td class="px-4 py-3 hidden md:table-cell text-slate-300">${escapeHtml(shiftLabel(s.shift))}</td>
-            <td class="px-4 py-3 text-right font-bold text-white">${fmt(s.marks)}</td>
-            <td class="px-4 py-3 text-right hidden sm:table-cell text-slate-300">${overallRankOf(s.marks)}</td>
+            <td class="px-4 py-3"><span class="chip bg-ink-700 text-slate-200">${escapeHtml(category)}</span></td>
+            <td class="px-4 py-3 hidden md:table-cell text-slate-300">${escapeHtml(shiftLabel(shift))}</td>
+            <td class="px-4 py-3 text-right font-bold text-white">${fmt(marks)}</td>
+            <td class="px-4 py-3 text-right hidden sm:table-cell text-slate-300">${overall}</td>
           </tr>`;
       }).join('');
-      body.innerHTML = rows;
-      $('boardMore').classList.toggle('hidden', filtered.length <= visibleRows);
+      $('boardMore').classList.toggle('hidden', list.length <= visibleRows);
     }
 
     $('filterCategory').addEventListener('change', () => { visibleRows = PAGE_SIZE; renderBoard(); });
