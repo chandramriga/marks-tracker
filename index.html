@@ -1,75 +1,11 @@
 <!DOCTYPE html>
-<!--
-  ============================================================================
-  HPRCA JOA (IT) · Post Code 26001 — Marks, Shift Difficulty & Rank Estimator
-  ============================================================================
-  Single-file app: HTML + Tailwind (CDN) + vanilla JS + Firebase v10 (modular).
-  Deploy as-is on Vercel / GitHub Pages / Netlify / Firebase Hosting.
 
-  QUICK SETUP
-  1. Firebase Console → create project → add a Web App → paste config below.
-  2. Authentication → Sign-in method → enable "Google" and "Email/Password".
-  3. Authentication → Settings → Authorized domains → add your deploy domain
-     (e.g. yourapp.vercel.app or username.github.io).
-  4. Firestore Database → create database → paste the SECURITY RULES below
-     (Rules tab → Publish). Do not skip this: the rules are what truly
-     enforce "one submission per user" and "unique roll number".
-  5. Edit MAX_MARKS and SHIFTS in the CONFIG section to match the real exam.
-
-  FIRESTORE DATA MODEL
-    submissions/{uid}  → public to signed-in users: name, category, shift,
-                         marks, rollMasked, uid, updatedAt
-                         (doc ID = uid  ⇒ a user can only ever have ONE entry)
-    private/{uid}      → { roll }  readable ONLY by the owner (used for edits)
-    rolls/{ROLL}       → { uid }   uniqueness lock (doc ID = roll number
-                         ⇒ the same roll number cannot be claimed twice)
-
-  SECURITY RULES (copy into Firestore → Rules)
-  ----------------------------------------------------------------------------
-  rules_version = '2';
-  service cloud.firestore {
-    match /databases/{db}/documents {
-
-      function signedIn() { return request.auth != null; }
-
-      // Public leaderboard data (read: any signed-in user)
-      match /submissions/{uid} {
-        allow read: if signedIn();
-        allow create, update: if signedIn()
-          && request.auth.uid == uid
-          && request.resource.data.uid == uid
-          && request.resource.data.category in ['General','EWS','OBC','SC','ST']
-          && request.resource.data.marks is number
-          && request.resource.data.marks >= 0
-          && request.resource.data.marks <= 120          // ← match MAX_MARKS
-          && request.resource.data.name is string
-          && request.resource.data.name.size() >= 2
-          && request.resource.data.name.size() <= 40
-          && request.resource.data.shift is string;
-        allow delete: if signedIn() && request.auth.uid == uid;
-      }
-
-      // Owner-only copy of the full roll number
-      match /private/{uid} {
-        allow read, write: if signedIn() && request.auth.uid == uid;
-      }
-
-      // Roll-number uniqueness locks (get only — no listing / scraping)
-      match /rolls/{roll} {
-        allow get: if signedIn();
-        allow create: if signedIn() && request.resource.data.uid == request.auth.uid;
-        allow update, delete: if signedIn() && resource.data.uid == request.auth.uid;
-      }
-    }
-  }
-  ----------------------------------------------------------------------------
--->
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>HPRCA JOA (IT) 26001 · Marks & Rank Estimator</title>
-  <meta name="description" content="Community marks tracker for HPRCA JOA (IT) Post Code 26001: compare shift difficulty and estimate your rank." />
+  <title>Himachal Exams Hub · HPRCA JOA (IT) 26001 Marks &amp; Rank Estimator</title>
+  <meta name="description" content="Himachal Exams Hub: community marks tracker for HPRCA JOA (IT) Post Code 26001. Compare shift difficulty and estimate your rank." />
   <meta name="theme-color" content="#0c1424" />
 
   <!-- Fonts -->
@@ -102,7 +38,7 @@
       select, input { color-scheme: dark; }
     }
     @layer components {
-      .panel   { @apply bg-ink-900 border border-ink-700 rounded-xl; }
+      .panel   { @apply bg-ink-900 border border-ink-700 rounded-xl shadow-lg shadow-black/20; }
       .label   { @apply block text-sm font-semibold text-slate-300 mb-1.5; }
       .field   { @apply w-full rounded-lg bg-ink-950 border border-ink-600 px-3.5 py-2.5 text-sm text-slate-100
                          placeholder-slate-500 transition-colors focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-500/30; }
@@ -122,16 +58,16 @@
 <body class="min-h-screen flex flex-col">
 
   <!-- ====================== NAVBAR ====================== -->
-  <header class="sticky top-0 z-40 border-b border-ink-700 bg-ink-950/90 backdrop-blur">
+  <header class="sticky top-0 z-40 bg-ink-950/90 backdrop-blur border-b border-ink-700">
+    <div class="h-1 bg-saffron-500" aria-hidden="true"></div>
     <div class="mx-auto max-w-6xl px-4 h-16 flex items-center justify-between gap-3">
-      <a href="#" class="flex items-center gap-3 min-w-0">
-        <span class="grid place-items-center h-9 w-9 rounded-lg bg-brand-500 shrink-0" aria-hidden="true">
-          <!-- bar chart icon -->
-          <svg class="h-5 w-5 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>
+      <a href="#" class="flex items-center gap-3 min-w-0" aria-label="Himachal Exams Hub home">
+        <span class="grid place-items-center h-10 w-10 rounded-lg bg-brand-600 ring-1 ring-brand-400/40 shrink-0">
+          <svg class="h-5 w-5 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m8 3 4 8 5-5 5 15H2L8 3z"/></svg>
         </span>
         <span class="min-w-0 leading-tight">
-          <span class="block font-extrabold text-white truncate">JOA (IT) 26001</span>
-          <span class="block text-xs text-slate-400 truncate">HPRCA marks &amp; rank estimator</span>
+          <span class="block text-base sm:text-lg font-extrabold text-white tracking-tight truncate">Himachal Exams Hub</span>
+          <span class="block text-xs text-slate-400 truncate">HPRCA JOA (IT) · Post Code 26001</span>
         </span>
       </a>
 
@@ -164,6 +100,10 @@
       <div class="grid lg:grid-cols-2 gap-10 lg:gap-16 items-center">
 
         <div>
+          <p class="mb-5 inline-flex items-center gap-2 rounded-full border border-ink-600 bg-ink-900 px-3.5 py-1.5 text-sm font-semibold text-slate-200">
+            <svg class="h-4 w-4 text-saffron-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m8 3 4 8 5-5 5 15H2L8 3z"/></svg>
+            Himachal Exams Hub
+          </p>
           <h1 class="text-3xl sm:text-4xl lg:text-5xl font-extrabold text-white leading-[1.1] tracking-tight">
             Which shift was tougher? See where your score stands.
           </h1>
@@ -230,21 +170,33 @@
     <!-- ====================== LOGGED-IN VIEW ====================== -->
     <section id="appView" class="hidden mx-auto max-w-6xl px-4 py-8 space-y-8">
 
+      <!-- Page header -->
+      <div class="flex flex-wrap items-end justify-between gap-4 border-b border-ink-700 pb-5">
+        <div>
+          <p class="text-sm font-semibold text-saffron-400">Himachal Exams Hub</p>
+          <h1 class="mt-1 text-2xl sm:text-3xl font-extrabold text-white tracking-tight">Marks and rank estimator</h1>
+          <p class="mt-1.5 text-sm text-slate-400">HPRCA Junior Office Assistant (IT) · Post Code 26001 · Exams held 28 Sep to 1 Oct 2026</p>
+        </div>
+        <span class="inline-flex items-center gap-2 rounded-full border border-ink-600 bg-ink-900 px-3 py-1.5 text-xs font-semibold text-slate-300">
+          <span class="h-2 w-2 rounded-full bg-emerald-400" aria-hidden="true"></span>Live data
+        </span>
+      </div>
+
       <!-- Overview numbers -->
       <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
-        <div class="panel p-4">
+        <div class="panel p-4 border-t-2 border-t-brand-500">
           <p class="text-sm text-slate-400">Submissions</p>
           <p id="statTotal" class="mt-1 text-2xl sm:text-3xl font-extrabold text-white">–</p>
         </div>
-        <div class="panel p-4">
+        <div class="panel p-4 border-t-2 border-t-brand-500">
           <p class="text-sm text-slate-400">Overall average</p>
           <p id="statAvg" class="mt-1 text-2xl sm:text-3xl font-extrabold text-white">–</p>
         </div>
-        <div class="panel p-4">
+        <div class="panel p-4 border-t-2 border-t-brand-500">
           <p class="text-sm text-slate-400">Highest score</p>
           <p id="statTop" class="mt-1 text-2xl sm:text-3xl font-extrabold text-white">–</p>
         </div>
-        <div class="panel p-4">
+        <div class="panel p-4 border-t-2 border-t-brand-500">
           <p class="text-sm text-slate-400">Maximum marks</p>
           <p id="statMax" class="mt-1 text-2xl sm:text-3xl font-extrabold text-slate-400">–</p>
         </div>
@@ -340,7 +292,7 @@
         <div class="panel overflow-hidden">
           <div class="overflow-x-auto">
             <table class="w-full text-sm text-left">
-              <thead class="bg-ink-800 text-slate-300">
+              <thead class="bg-ink-800 text-slate-300 border-b border-ink-600">
                 <tr>
                   <th class="px-4 py-3 font-semibold w-20">Rank</th>
                   <th class="px-4 py-3 font-semibold">Candidate</th>
@@ -372,8 +324,22 @@
     </section>
   </main>
 
-  <footer class="border-t border-ink-700 py-6 text-center text-xs text-slate-500 px-4">
-    Unofficial community tool. Not affiliated with HPRCA. Marks are self-reported and unverified.
+  <footer class="border-t border-ink-700 bg-ink-900/60">
+    <div class="mx-auto max-w-6xl px-4 py-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+      <div class="flex items-center gap-3">
+        <span class="grid place-items-center h-9 w-9 rounded-lg bg-brand-600 shrink-0">
+          <svg class="h-5 w-5 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m8 3 4 8 5-5 5 15H2L8 3z"/></svg>
+        </span>
+        <div class="leading-tight">
+          <p class="font-bold text-white">Himachal Exams Hub</p>
+          <p class="text-xs text-slate-400">Tools and updates for Himachal government exam aspirants</p>
+        </div>
+      </div>
+      <p class="max-w-md text-xs text-slate-500 sm:text-right">
+        Unofficial community tool, not affiliated with HPRCA. Marks are self-reported and unverified,
+        so ranks shown are estimates only.
+      </p>
+    </div>
   </footer>
 
   <!-- Toast -->
