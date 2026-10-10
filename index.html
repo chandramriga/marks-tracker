@@ -41,7 +41,8 @@
       .panel   { @apply bg-ink-900 border border-ink-700 rounded-xl shadow-lg shadow-black/20; }
       .label   { @apply block text-sm font-semibold text-slate-300 mb-1.5; }
       .field   { @apply w-full rounded-lg bg-ink-950 border border-ink-600 px-3.5 py-2.5 text-sm text-slate-100
-                         placeholder-slate-500 transition-colors focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-500/30; }
+                         placeholder-slate-500 transition-colors focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-500/30
+                         disabled:opacity-70 disabled:cursor-not-allowed; }
       .btn     { @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold
                          transition-colors disabled:opacity-60 disabled:cursor-not-allowed; }
       .btn-primary { @apply btn bg-brand-500 text-white hover:bg-brand-600; }
@@ -210,7 +211,7 @@
           <div class="flex items-start justify-between gap-3">
             <div>
               <h2 id="formTitle" class="text-lg font-bold text-white">Submit your marks</h2>
-              <p id="formHint" class="mt-1 text-sm text-slate-400">One entry per account. You can edit it later.</p>
+              <p id="formHint" class="mt-1 text-sm text-slate-400">One entry per account. Entries cannot be changed after submitting.</p>
             </div>
             <span id="formBadge" class="hidden chip bg-emerald-500/15 text-emerald-300">Submitted</span>
           </div>
@@ -247,7 +248,6 @@
 
             <div class="sm:col-span-2 flex flex-wrap gap-3">
               <button id="saveBtn" type="submit" class="btn-primary">Submit marks</button>
-              <button id="deleteBtn" type="button" class="hidden btn-ghost !border-red-500/40 !text-red-300 hover:!bg-red-500/10">Delete my entry</button>
             </div>
           </form>
         </div>
@@ -650,10 +650,12 @@
       if (marksRaw === '' || !Number.isFinite(marks)) return showError(errEl, 'Enter your raw marks.');
       if (marks < 0 || marks > MAX_MARKS) return showError(errEl, `Marks must be between 0 and ${MAX_MARKS}.`);
 
+      if (allSubs.some((s) => s.id === currentUser.uid)) return showError(errEl, 'You have already submitted. Entries cannot be changed.');
+      if (!confirm('Submit these details?\n\nOnce submitted, your entry cannot be edited or deleted.')) return;
+
       const uid = currentUser.uid;
       const btn = $('saveBtn');
       btn.disabled = true;
-      const isEdit = allSubs.some((s) => s.id === uid);
 
       try {
         await runTransaction(db, async (tx) => {
@@ -662,17 +664,13 @@
           const subRef  = doc(db, 'submissions', uid);
 
           // All reads first
+          const subSnap  = await tx.get(subRef);
           const rollSnap = await tx.get(rollRef);
-          const privSnap = await tx.get(privRef);
 
-          // Roll number already claimed by someone else?
-          if (rollSnap.exists() && rollSnap.data().uid !== uid) throw new Error('ROLL_TAKEN');
+          if (subSnap.exists()) throw new Error('ALREADY_SUBMITTED');   // one entry per account
+          if (rollSnap.exists()) throw new Error('ROLL_TAKEN');         // roll number already used
 
-          // If the user changed their roll number, release the old lock
-          const oldRoll = privSnap.exists() ? privSnap.data().roll : null;
-          if (oldRoll && oldRoll !== roll) tx.delete(doc(db, 'rolls', oldRoll));
-
-          // Writes
+          // Writes (create-only: the security rules block any later update or delete)
           tx.set(rollRef, { uid });
           tx.set(privRef, { roll });
           tx.set(subRef, {
@@ -682,10 +680,11 @@
           });
         });
         myRoll = roll;
-        toast(isEdit ? 'Entry updated.' : 'Marks submitted. Thank you!');
+        toast('Marks submitted. Thank you!');
       } catch (e) {
         console.error(e);
         if (e.message === 'ROLL_TAKEN') showError(errEl, 'This roll number is already registered by another account. Check for typos.');
+        else if (e.message === 'ALREADY_SUBMITTED') showError(errEl, 'You have already submitted. Entries cannot be changed.');
         else if (e.code === 'permission-denied') showError(errEl, 'Permission denied. Publish the Firestore security rules from the top of this file.');
         else showError(errEl, 'Could not save your entry. Check your connection and try again.');
       } finally {
@@ -693,47 +692,23 @@
       }
     });
 
-    $('deleteBtn').addEventListener('click', async () => {
-      if (!confirm('Delete your entry? You can submit again later.')) return;
-      const uid = currentUser.uid;
-      try {
-        await runTransaction(db, async (tx) => {
-          const privSnap = await tx.get(doc(db, 'private', uid));
-          if (privSnap.exists()) tx.delete(doc(db, 'rolls', privSnap.data().roll));
-          tx.delete(doc(db, 'private', uid));
-          tx.delete(doc(db, 'submissions', uid));
-        });
-        myRoll = '';
-        $('markForm').reset();
-        $('fName').value = currentUser.displayName || '';
-        toast('Your entry was deleted.');
-      } catch (e) {
-        console.error(e);
-        toast('Could not delete your entry.', 'error');
-      }
-    });
-
-    // Fill the form with the user's existing entry (only when it isn't being edited)
-    let formFilledFor = null;
+    // After submitting, the form becomes a locked, read-only record of the entry
     function syncForm(mine) {
-      $('formBadge').classList.toggle('hidden', !mine);
-      $('deleteBtn').classList.toggle('hidden', !mine);
-      $('saveBtn').textContent = mine ? 'Update my entry' : 'Submit marks';
-      $('formTitle').textContent = mine ? 'Your submission' : 'Submit your marks';
-      $('formHint').textContent = mine
-        ? 'Change any field and update. You cannot create a second entry.'
-        : 'One entry per account. You can edit it later.';
-
-      if (mine && formFilledFor !== mine.id + (myRoll || '')) {
-        if (document.activeElement && $('markForm').contains(document.activeElement)) return; // don't overwrite typing
+      const locked = !!mine;
+      $('formBadge').classList.toggle('hidden', !locked);
+      $('saveBtn').classList.toggle('hidden', locked);
+      $('formTitle').textContent = locked ? 'Your submission' : 'Submit your marks';
+      $('formHint').textContent = locked
+        ? 'Your entry is saved and locked. It cannot be edited or deleted.'
+        : 'One entry per account. Check your details first: entries cannot be changed after submitting.';
+      ['fName', 'fCategory', 'fRoll', 'fShift', 'fMarks'].forEach((id) => { $(id).disabled = locked; });
+      if (locked) {
         $('fName').value = mine.name;
         $('fCategory').value = mine.category;
         $('fShift').value = mine.shift;
         $('fMarks').value = mine.marks;
-        $('fRoll').value = myRoll || '';
-        formFilledFor = mine.id + (myRoll || '');
+        $('fRoll').value = myRoll || mine.rollMasked || '';
       }
-      if (!mine) formFilledFor = null;
     }
 
     /* ------------------------------------------------------------------
