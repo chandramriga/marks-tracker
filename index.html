@@ -1232,31 +1232,34 @@ LONG LIVE VCHAND
       return bins;
     }
 
-
     /* ---- Unusually-high score flag (front-end only) ---- */
-    const FLAG_K     = 2;    // how many IQRs above the upper quartile counts as "unusually high"
-    const FLAG_MIN_N = 30;   // entries needed before a shift's own spread is trusted
-    let _fenceCache = { t: null, m: {} };
+    const FLAG_K     = 1.5;  // standard outlier rule: 1.5 x IQR above the upper quartile
+    const FLAG_MIN_N = 30;   // entries needed before a shift's own median is trusted
+    let _fenceCache = { t: null, v: null, centers: {} };
 
-    function fenceFor(key) {                       // key = shift id or 'all'
-      if (_fenceCache.t !== snap.t) _fenceCache = { t: snap.t, m: {} };
-      if (!(key in _fenceCache.m)) {
-        const hist = key === 'all' ? snap.h.all : snap.h['s:' + key];
-        let f = null;
-        if (hist && histTotal(hist) >= FLAG_MIN_N) {
-          const q1 = quantile(hist, 0.25), q3 = quantile(hist, 0.75);
+    function fenceInfo() {
+      if (_fenceCache.t !== snap.t) {
+        const all = snap.h.all;
+        let v = null;
+        if (all && histTotal(all) >= FLAG_MIN_N) {
+          const q1 = quantile(all, 0.25), med = quantile(all, 0.5), q3 = quantile(all, 0.75);
           const iqr = q3 - q1;
-          if (iqr > 0) f = { limit: q3 + FLAG_K * iqr };
+          if (iqr > 0) v = { med, offset: q3 + FLAG_K * iqr - med };   // distance above the median allowed
         }
-        _fenceCache.m[key] = f;
+        _fenceCache = { t: snap.t, v, centers: {} };
       }
-      return _fenceCache.m[key];
+      return _fenceCache;
     }
 
     function isUnusuallyHigh(shiftId, marks) {
       if (!snap) return false;
-      const f = fenceFor(shiftId) || fenceFor('all');
-      return !!f && marks > f.limit;
+      const c = fenceInfo();
+      if (!c.v) return false;
+      if (!(shiftId in c.centers)) {
+        const h = snap.h['s:' + shiftId];
+        c.centers[shiftId] = h && histTotal(h) >= FLAG_MIN_N ? quantile(h, 0.5) : c.v.med;
+      }
+      return marks > c.centers[shiftId] + c.v.offset;
     }
 
     function renderDifficulty() {
