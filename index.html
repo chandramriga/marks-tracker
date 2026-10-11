@@ -316,6 +316,44 @@ LONG LIVE VCHAND
         <div id="shiftCards" class="grid sm:grid-cols-2 lg:grid-cols-4 gap-4"></div>
       </div>
 
+
+
+      <!-- Charts -->
+      <div class="grid lg:grid-cols-2 gap-6">
+
+        <div class="panel p-5 sm:p-6">
+          <h2 class="text-lg font-bold text-white">Difficulty ranking</h2>
+          <p class="mt-1 text-sm text-slate-400">Toughest shift first. Bars show how far each shift's average is from the overall average.</p>
+          <p id="diffInsight" class="mt-3 text-sm text-slate-300"></p>
+          <div class="mt-4 flex items-center justify-between text-xs text-slate-500">
+            <span>← Tougher</span><span>Easier →</span>
+          </div>
+          <div id="diffRank" class="mt-2 space-y-4"></div>
+        </div>
+
+        <div class="panel p-5 sm:p-6">
+          <div class="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 class="text-lg font-bold text-white">Score distribution</h2>
+              <p class="mt-1 text-sm text-slate-400">Number of entries in each 10-mark range. Orange is where you are.</p>
+            </div>
+            <div>
+              <label for="distShift" class="sr-only">Shift for distribution chart</label>
+              <select id="distShift" class="field !py-2 w-48"></select>
+            </div>
+          </div>
+          <div id="distChart" class="mt-5 flex items-end gap-1 h-44 border-b border-ink-700"></div>
+          <div id="distAxis" class="mt-1 flex gap-1 text-[10px] text-slate-500"></div>
+          <p id="distSummary" class="mt-4 text-sm text-slate-300"></p>
+        </div>
+
+        <div class="panel p-5 sm:p-6 lg:col-span-2">
+          <h2 class="text-lg font-bold text-white">Category split</h2>
+          <p class="mt-1 text-sm text-slate-400">Share of submissions and average marks by category.</p>
+          <div id="catChart" class="mt-4"></div>
+        </div>
+
+      </div>
       <!-- Leaderboard -->
       <div>
         <div class="flex flex-wrap items-end justify-between gap-4 mb-4">
@@ -526,6 +564,8 @@ LONG LIVE VCHAND
     buildShiftOptions($('fShift'));
     $('filterCategory').add(new Option('All categories', ''));
     CATEGORIES.forEach((c) => $('filterCategory').add(new Option(c, c)));
+
+    buildShiftOptions($('distShift'), true);
     buildShiftOptions($('filterShift'), true);
     $('fMarks').max = MAX_MARKS;
     $('marksHelp').textContent = `Between 0 and ${MAX_MARKS}.`;
@@ -965,6 +1005,9 @@ LONG LIVE VCHAND
       renderStats();
       renderMyStanding();
       renderShiftCards();
+      renderDifficulty();
+      renderDistribution();
+      renderCategories();
       renderBoard();
       syncForm();
     }
@@ -1140,6 +1183,173 @@ LONG LIVE VCHAND
       $('boardMore').classList.toggle('hidden', list.length <= visibleRows);
     }
 
+
+    /* ---- Charts (front-end only, built from the published snapshot) ---- */
+    const CAT_COLORS = {
+      General: 'bg-brand-500', EWS: 'bg-saffron-500', OBC: 'bg-emerald-500', SC: 'bg-violet-500', ST: 'bg-rose-500'
+    };
+
+    const histEntries = (hist) =>
+      Object.keys(hist || {}).map((k) => [Number(k) / 100, hist[k]]).sort((a, b) => a[0] - b[0]);
+    const histTotal = (hist) => { let t = 0; for (const k in hist) t += hist[k]; return t; };
+    const histMean = (hist) => {
+      let s = 0, t = 0;
+      for (const k in hist) { s += (Number(k) / 100) * hist[k]; t += hist[k]; }
+      return t ? s / t : 0;
+    };
+    function quantile(hist, q) {
+      const e = histEntries(hist);
+      const total = e.reduce((a, x) => a + x[1], 0);
+      if (!total) return 0;
+      const target = Math.max(1, Math.ceil(q * total));
+      let run = 0;
+      for (const [m, c] of e) { run += c; if (run >= target) return m; }
+      return e[e.length - 1][0];
+    }
+    function countBelow(hist, marks) {
+      const m = Math.round(marks * 100);
+      let c = 0;
+      for (const k in hist) if (Number(k) < m) c += hist[k];
+      return c;
+    }
+    function binCounts(hist, size) {
+      const bins = Array(Math.ceil(MAX_MARKS / size)).fill(0);
+      for (const k in hist) {
+        const i = Math.min(bins.length - 1, Math.floor(Number(k) / 100 / size));
+        bins[i] += hist[k];
+      }
+      return bins;
+    }
+
+    function renderDifficulty() {
+      const box = $('diffRank');
+      const insight = $('diffInsight');
+      const overallAvg = snap && snap.n ? snap.sum / snap.n : 0;
+
+      const rows = SHIFTS.map((s) => {
+        const st = snap && snap.shift[s.id];
+        if (!st || !st.n) return null;
+        const hist = snap.h['s:' + s.id];
+        const avg = st.sum / st.n;
+        return { id: s.id, n: st.n, avg, delta: avg - overallAvg, median: quantile(hist, 0.5), p90: quantile(hist, 0.9) };
+      }).filter(Boolean).sort((a, b) => a.avg - b.avg);
+
+      if (!rows.length) {
+        box.innerHTML = '<p class="text-sm text-slate-400">No data yet. This fills in after the first ranking update.</p>';
+        insight.textContent = '';
+        return;
+      }
+
+      const solid = rows.filter((r) => r.n >= MIN_RELIABLE);
+      if (solid.length >= 2) {
+        const t = solid[0], e = solid[solid.length - 1];
+        insight.innerHTML =
+          `Toughest so far: <strong class="text-white">${escapeHtml(shiftLabel(t.id))}</strong> (average ${fmt(t.avg)}). ` +
+          `Easiest: <strong class="text-white">${escapeHtml(shiftLabel(e.id))}</strong> (average ${fmt(e.avg)}). ` +
+          `Gap: <strong class="text-saffron-400">${fmt(e.avg - t.avg)}</strong> marks.`;
+      } else {
+        insight.textContent = '';
+      }
+
+      const maxAbs = Math.max(0.01, ...rows.map((r) => Math.abs(r.delta)));
+      box.innerHTML = rows.map((r, i) => {
+        const tough = r.delta < 0;
+        const w = (Math.abs(r.delta) / maxAbs) * 50;
+        const faded = r.n < MIN_RELIABLE ? 'opacity-60' : '';
+        const isMe = mine && mine.shift === r.id;
+        return `
+          <div class="${faded}">
+            <div class="flex items-center justify-between gap-2 text-sm">
+              <span class="flex items-center gap-2 min-w-0">
+                <span class="grid place-items-center h-6 w-6 shrink-0 rounded-full text-xs font-extrabold ${i === 0 ? 'bg-red-500/20 text-red-300' : 'bg-ink-700 text-slate-300'}">${i + 1}</span>
+                <span class="truncate font-semibold text-white">${escapeHtml(shiftLabel(r.id))}</span>
+                ${isMe ? '<span class="chip bg-brand-500/20 text-brand-400">You</span>' : ''}
+              </span>
+              <span class="shrink-0 font-bold ${tough ? 'text-red-300' : 'text-emerald-300'}">${r.delta >= 0 ? '+' : ''}${fmt(round2(r.delta))}</span>
+            </div>
+            <div class="relative mt-1.5 h-3 rounded-full bg-ink-950 border border-ink-700 overflow-hidden" role="img"
+                 aria-label="${escapeHtml(shiftLabel(r.id))}: ${fmt(round2(r.delta))} marks versus the overall average">
+              <div class="absolute inset-y-0 left-1/2 w-px bg-slate-500"></div>
+              <div class="bar-fill absolute inset-y-0 ${tough ? 'right-1/2 bg-red-400/80' : 'left-1/2 bg-emerald-400/80'}" style="width:${w}%"></div>
+            </div>
+            <p class="mt-1 text-xs text-slate-500">Avg ${fmt(r.avg)} · Median ${fmt(r.median)} · Top 10% from ${fmt(r.p90)} · ${r.n} ${r.n === 1 ? 'entry' : 'entries'}</p>
+          </div>`;
+      }).join('');
+    }
+
+    function renderDistribution() {
+      const sel = $('distShift').value;
+      const hist = snap ? (sel ? snap.h['s:' + sel] : snap.h.all) : null;
+      const total = hist ? histTotal(hist) : 0;
+      const chart = $('distChart');
+
+      if (!total) {
+        chart.innerHTML = '<p class="m-auto pb-14 text-sm text-slate-400">No data for this selection yet.</p>';
+        $('distAxis').innerHTML = '';
+        $('distSummary').textContent = '';
+        return;
+      }
+
+      const SIZE = 10;
+      const bins = binCounts(hist, SIZE);
+      const maxC = Math.max(...bins);
+      const myBin = mine ? Math.min(bins.length - 1, Math.floor(mine.marks / SIZE)) : -1;
+
+      chart.innerHTML = bins.map((c, i) => {
+        const lo = i * SIZE;
+        const hi = i === bins.length - 1 ? MAX_MARKS : lo + SIZE - 0.01;
+        const px = c ? Math.max(3, Math.round((c / maxC) * 130)) : 0;
+        return `
+          <div class="flex-1 min-w-0 flex flex-col items-center justify-end" title="${lo} to ${hi}: ${c} entries">
+            <span class="mb-1 text-[10px] text-slate-400">${c || ''}</span>
+            <div class="bar-fill w-full rounded-t ${i === myBin ? 'bg-saffron-400' : 'bg-brand-500/80'}" style="height:${px}px"></div>
+          </div>`;
+      }).join('');
+      $('distAxis').innerHTML = bins.map((_, i) => `<span class="flex-1 text-center">${i * SIZE}</span>`).join('');
+
+      let you = '';
+      if (mine) {
+        const pct = Math.round((countBelow(hist, mine.marks) / total) * 100);
+        you = ` Your ${fmt(mine.marks)} marks put you ahead of <strong class="text-saffron-400">${pct}%</strong> of this group.`;
+      }
+      $('distSummary').innerHTML =
+        `${total} entries · Average ${fmt(histMean(hist))} · Median ${fmt(quantile(hist, 0.5))}.${you}`;
+    }
+
+    function renderCategories() {
+      const box = $('catChart');
+      const total = snap ? CATEGORIES.reduce((a, c) => a + (snap.cat[c] || 0), 0) : 0;
+      if (!total) {
+        box.innerHTML = '<p class="text-sm text-slate-400">No data yet.</p>';
+        return;
+      }
+      const bar = CATEGORIES.map((c) => {
+        const n = snap.cat[c] || 0;
+        return n ? `<div class="${CAT_COLORS[c]} h-full" style="width:${(n / total) * 100}%" title="${escapeHtml(c)}: ${n}"></div>` : '';
+      }).join('');
+
+      const legend = CATEGORIES.map((c) => {
+        const n = snap.cat[c] || 0;
+        const avg = n ? fmt(histMean(snap.h['c:' + c])) : '–';
+        const isMe = mine && mine.category === c;
+        return `
+          <div class="rounded-lg bg-ink-950 border ${isMe ? 'border-brand-500/60' : 'border-ink-700'} p-3">
+            <div class="flex items-center gap-2 text-sm">
+              <span class="h-2.5 w-2.5 rounded-full ${CAT_COLORS[c]}"></span>
+              <span class="font-semibold text-white">${escapeHtml(c)}</span>
+              ${isMe ? '<span class="chip bg-brand-500/20 text-brand-400">You</span>' : ''}
+            </div>
+            <p class="mt-1.5 text-lg font-bold text-white">${Math.round((n / total) * 100)}% <span class="text-sm font-medium text-slate-400">(${n})</span></p>
+            <p class="text-xs text-slate-400">Average marks ${avg}</p>
+          </div>`;
+      }).join('');
+
+      box.innerHTML = `
+        <div class="flex h-4 w-full overflow-hidden rounded-full bg-ink-950 border border-ink-700">${bar}</div>
+        <div class="mt-4 grid grid-cols-2 sm:grid-cols-5 gap-3">${legend}</div>`;
+    }
+
+    $('distShift').addEventListener('change', renderDistribution);
     $('filterCategory').addEventListener('change', () => { visibleRows = PAGE_SIZE; renderBoard(); });
     $('filterShift').addEventListener('change', () => { visibleRows = PAGE_SIZE; renderBoard(); });
     $('moreBtn').addEventListener('click', () => { visibleRows += PAGE_SIZE; renderBoard(); });
