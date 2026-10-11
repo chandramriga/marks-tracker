@@ -398,6 +398,7 @@ LONG LIVE VCHAND
           The table lists the top entries for each filter. Your own rank, even if you are further down, is in
           "Your estimated standing" above. Candidates with equal marks share a rank. Estimates come from
           voluntary submissions, not official results, so the real rank can differ.
+          Entries tagged "Unusually high" are far above their shift's typical scores and are unverified.
         </p>
       </div>
 
@@ -1067,6 +1068,12 @@ LONG LIVE VCHAND
           against the average of your shift (${escapeHtml(shiftLabel(mine.shift))}).</p>`;
       }
 
+      const flagNote = isUnusuallyHigh(mine.shift, mine.marks)
+        ? `<div class="mt-4 rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-200">
+             Your score is far above the usual range for your shift, so it appears as <strong>unusually high</strong> on the leaderboard. If it is correct, no action is needed.
+           </div>`
+        : '';
+  
       box.innerHTML = `
         <div class="flex items-baseline gap-2">
           <span class="text-5xl font-extrabold text-white">${overall}</span>
@@ -1083,7 +1090,8 @@ LONG LIVE VCHAND
             <dd class="mt-0.5 text-lg font-bold text-white">${fmt(mine.marks)} <span class="text-sm font-medium text-slate-400">/ ${MAX_MARKS}</span></dd>
           </div>
         </dl>
-        ${diffLine}`;
+        ${diffLine}
+        ${flagNote}`;
     }
 
     function renderShiftCards() {
@@ -1162,6 +1170,7 @@ LONG LIVE VCHAND
         const rank = 1 + list.filter((x) => x[4] > marks).length;      // rank within this filter
         const overall = 1 + countAbove(snap.h.all, marks);             // rank among everyone
         const isMe = key === myKey;
+        const high = isUnusuallyHigh(shift, marks);
         const rankChip = rank <= 3
           ? `<span class="inline-grid place-items-center h-7 w-7 rounded-full text-xs font-extrabold ${rank === 1 ? 'bg-saffron-400 text-slate-900' : rank === 2 ? 'bg-slate-300 text-slate-900' : 'bg-amber-700 text-white'}">${rank}</span>`
           : `<span class="font-semibold text-slate-200">${rank}</span>`;
@@ -1171,7 +1180,9 @@ LONG LIVE VCHAND
             <td class="px-4 py-3">
               <span class="font-semibold text-white">${escapeHtml(name)}</span>
               ${isMe ? '<span class="chip ml-2 bg-brand-500/20 text-brand-400">You</span>' : ''}
+              ${high ? '<span class="chip ml-2 bg-red-500/15 text-red-300" title="Far above this shift\'s usual scores">Unusually high</span>' : ''}
               <span class="block text-xs text-slate-500">Roll ${escapeHtml(roll)}</span>
+              ${high ? '<span class="block text-xs text-red-300/80">Much higher than this shift\'s usual scores. Unverified, may be inaccurate.</span>' : ''}
               <span class="block md:hidden text-xs text-slate-400">${escapeHtml(shiftLabel(shift))}</span>
             </td>
             <td class="px-4 py-3"><span class="chip bg-ink-700 text-slate-200">${escapeHtml(category)}</span></td>
@@ -1219,6 +1230,33 @@ LONG LIVE VCHAND
         bins[i] += hist[k];
       }
       return bins;
+    }
+
+
+    /* ---- Unusually-high score flag (front-end only) ---- */
+    const FLAG_K     = 2;    // how many IQRs above the upper quartile counts as "unusually high"
+    const FLAG_MIN_N = 30;   // entries needed before a shift's own spread is trusted
+    let _fenceCache = { t: null, m: {} };
+
+    function fenceFor(key) {                       // key = shift id or 'all'
+      if (_fenceCache.t !== snap.t) _fenceCache = { t: snap.t, m: {} };
+      if (!(key in _fenceCache.m)) {
+        const hist = key === 'all' ? snap.h.all : snap.h['s:' + key];
+        let f = null;
+        if (hist && histTotal(hist) >= FLAG_MIN_N) {
+          const q1 = quantile(hist, 0.25), q3 = quantile(hist, 0.75);
+          const iqr = q3 - q1;
+          if (iqr > 0) f = { limit: q3 + FLAG_K * iqr };
+        }
+        _fenceCache.m[key] = f;
+      }
+      return _fenceCache.m[key];
+    }
+
+    function isUnusuallyHigh(shiftId, marks) {
+      if (!snap) return false;
+      const f = fenceFor(shiftId) || fenceFor('all');
+      return !!f && marks > f.limit;
     }
 
     function renderDifficulty() {
