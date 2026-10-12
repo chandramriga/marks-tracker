@@ -1232,7 +1232,7 @@ LONG LIVE VCHAND
               ${isMe ? '<span class="chip ml-2 bg-brand-500/20 text-brand-400">You</span>' : ''}
               ${high ? '<span class="chip ml-2 bg-red-500/15 text-red-300" title="Far above this shift\'s usual scores">Unusually high</span>' : ''}
               <span class="block text-xs text-slate-500">Roll ${escapeHtml(roll)}</span>
-              ${high ? '<span class="block text-xs text-red-300/80">Much higher than this shift\'s usual scores. Unverified, may be inaccurate.</span>' : ''}
+              ${high ? '<span class="block text-xs text-red-300/80">Statistical outlier for this shift. Unverified, may be inaccurate.</span>' : ''}
               <span class="block md:hidden text-xs text-slate-400">${escapeHtml(shiftLabel(shift))}</span>
             </td>
             <td class="px-4 py-3"><span class="chip bg-ink-700 text-slate-200">${escapeHtml(category)}</span></td>
