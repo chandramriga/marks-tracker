@@ -207,8 +207,12 @@ LONG LIVE VCHAND
               कृपया अपने <strong class="text-white">असली अंक ही भरें</strong>। गलत अंक भरने से सभी ईमानदार
               उम्मीदवारों का औसत और रैंक अनुमान बिगड़ता है। जो ईमानदार रहेंगे, उन्हें भविष्य में बेहतर परिणाम ही मिलेंगे!
             </p>
-            <p class="text-xs text-slate-400">
-              
+            <p class="text-sm text-slate-300">
+            <strong class="text-white">What's new:</strong> Some entries were unrealistically high or low, so we made the
+  predictions smarter. Extreme entries are now left out of averages, ranks and normalization (they still show in
+  the table with a tag). Your rank is now worked out after normalization, so the tougher shifts are not penalised.
+  You also see a likely rank range, because not everyone has submitted yet.
+  If your score is genuine, nothing changes for you.
             </p>
           </div>
         </div>
@@ -248,7 +252,7 @@ LONG LIVE VCHAND
           <p id="statMax" class="mt-1 text-2xl sm:text-3xl font-extrabold text-slate-400">–</p>
         </div>
       </div>
-
+         <p id="cleanNote" class="hidden -mt-4 text-xs text-slate-400"></p>
       <!-- Form + my rank -->
       <div class="grid lg:grid-cols-5 gap-6">
 
@@ -404,7 +408,7 @@ LONG LIVE VCHAND
           The table lists the top entries for each filter. Your own rank, even if you are further down, is in
           "Your estimated standing" above. Candidates with equal marks share a rank. Estimates come from
           voluntary submissions, not official results, so the real rank can differ.
-          Entries tagged "Unusually high" are far above their shift's typical scores and are unverified.
+          Entries tagged "Unusually high" or "Unusually low" are far above/below their shift's typical scores and are unverified.
         </p>
       </div>
 
@@ -1044,10 +1048,22 @@ LONG LIVE VCHAND
       if (unset && currentUser) hint.textContent = `Admin setup: your account ID is ${currentUser.uid}`;
     }
 
+
     function renderStats() {
+      const c = snap ? cleanHists() : null;
+      const n = c ? histTotal(c.all) : 0;
       $('statTotal').textContent = snap ? snap.n : '–';
-      $('statAvg').textContent = snap && snap.n ? fmt(snap.sum / snap.n) : '–';
-      $('statTop').textContent = snap && snap.n ? fmt(snap.max) : '–';
+      $('statAvg').textContent = n ? fmt(histMean(c.all)) : '–';
+      $('statTop').textContent = n ? fmt(histMax(c.all)) : '–';
+      const note = $('cleanNote');
+      if (note) {
+        if (snap && snap.n) {
+          const out = snap.n - n;
+          note.textContent = 'Averages, ranks and normalization ignore extreme entries (unrealistically high or low).' +
+            (out ? ` Currently ${out} left out.` : '');
+          note.classList.remove('hidden');
+        } else note.classList.add('hidden');
+      }
     }
 
     function renderMyStanding() {
@@ -1060,32 +1076,37 @@ LONG LIVE VCHAND
         box.innerHTML = `<p class="text-sm text-slate-300">Your entry is saved. Rank estimates will appear once the first rankings are published.</p>`;
         return;
       }
-      const overall = 1 + countAbove(snap.h.all, mine.marks);
-      const catRank = 1 + countAbove(snap.h['c:' + mine.category], mine.marks);
-      const catN = snap.cat[mine.category] || 0;
-      const sh = snap.shift[mine.shift];
-      const topPct = Math.max(1, Math.round((overall / Math.max(snap.n, overall)) * 100));
+      const c = cleanHists();
+      const est = estimateRank(mine.marks, mine.shift);
+      const overall = est.rank, total = Math.max(est.total, overall);
+      const cat = c.cat[mine.category];
+      const catRank = 1 + countAbove(cat, mine.marks);
+      const catN = cat ? histTotal(cat) : 0;
+      const topPct = Math.max(1, Math.round((overall / total) * 100));
+      const sh = c.shift[mine.shift];
 
       let diffLine = '';
-      if (sh && sh.n) {
-        const diff = round2(mine.marks - sh.sum / sh.n);
+      if (sh && histTotal(sh)) {
+        const diff = round2(mine.marks - histMean(sh));
         diffLine = `<p class="mt-4 text-sm text-slate-300">
           You scored <strong class="${diff >= 0 ? 'text-emerald-300' : 'text-red-300'}">${diff >= 0 ? '+' : ''}${fmt(diff)}</strong>
           against the average of your shift (${escapeHtml(shiftLabel(mine.shift))}).</p>`;
       }
-
-      const flagNote = isUnusuallyHigh(mine.shift, mine.marks)
+      const side = outlierSide(mine.shift, mine.marks);
+      const flagNote = side
         ? `<div class="mt-4 rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-200">
-             Your score is far above the usual range for your shift, so it appears as <strong>unusually high</strong> on the leaderboard. If it is correct, no action is needed.
-           </div>`
-        : '';
-  
+             Your score is far ${side === 'high' ? 'above' : 'below'} the usual range for your shift, so it is tagged
+             <strong>unusually ${side}</strong> and may be left out of the averages. If it is correct, no action is needed.
+           </div>` : '';
+
       box.innerHTML = `
         <div class="flex items-baseline gap-2">
           <span class="text-5xl font-extrabold text-white">${overall}</span>
-          <span class="text-slate-400">of ${Math.max(snap.n, overall)} overall</span>
+          <span class="text-slate-400">of ${total} overall</span>
         </div>
+        <p class="mt-1 text-sm text-slate-300">Likely range: <strong class="text-white">${est.lo} to ${est.hi}</strong></p>
         <p class="mt-1 text-sm text-saffron-400 font-semibold">Top ${topPct}% of published submissions</p>
+        <p class="mt-1 text-xs text-slate-500">Ranked on normalized marks, with extreme entries excluded.</p>
         <dl class="mt-5 grid grid-cols-2 gap-3 text-sm">
           <div class="rounded-lg bg-ink-950 border border-ink-700 p-3">
             <dt class="text-slate-400">${escapeHtml(mine.category)} rank</dt>
@@ -1100,16 +1121,17 @@ LONG LIVE VCHAND
         ${flagNote}`;
     }
 
-    
     function renderShiftCards() {
-      const overallAvg = snap && snap.n ? snap.sum / snap.n : 0;
+      const cl = snap ? cleanHists() : null;
+      const overallAvg = cl && histTotal(cl.all) ? histMean(cl.all) : 0;
       const norm = computeNorm();
       const sgn = (n) => (n >= 0 ? '+' : '') + fmt(round2(n));
 
       $('shiftCards').innerHTML = SHIFTS.map((s) => {
-        const st = (snap && snap.shift[s.id]) || { n: 0, sum: 0, max: 0 };
-        const n = st.n;
-        const avg = n ? st.sum / n : 0;
+        const h = cl && cl.shift[s.id];
+        const n = h ? histTotal(h) : 0;
+        const avg = n ? histMean(h) : 0;
+        const st = { n, max: n ? histMax(h) : 0 };
         const pct = Math.min(100, (avg / MAX_MARKS) * 100);
 
         let badge = '<span class="chip bg-ink-700 text-slate-300">No data</span>';
@@ -1123,7 +1145,6 @@ LONG LIVE VCHAND
         }
         const avgMark = Math.min(100, (overallAvg / MAX_MARKS) * 100);
 
-        // Possible normalization block
         let normHtml = '';
         const r = norm && norm.byShift[s.id];
         if (norm && r) {
@@ -1217,28 +1238,30 @@ LONG LIVE VCHAND
 
       body.innerHTML = list.slice(0, visibleRows).map((r) => {
         const [name, roll, category, shift, marks, key] = r;
-        const rank = 1 + list.filter((x) => x[4] > marks).length;      // rank within this filter
-        const overall = 1 + countAbove(snap.h.all, marks);             // rank among everyone
+        const out = isExcluded(shift, marks);
+        const side = outlierSide(shift, marks);
+        const rank = out ? null : 1 + list.filter((x) => x[4] > marks && !isExcluded(x[3], x[4])).length;
+        const overall = out ? null : estimateRank(marks, shift).rank;
         const isMe = key === myKey;
-        const high = isUnusuallyHigh(shift, marks);
-        const rankChip = rank <= 3
-          ? `<span class="inline-grid place-items-center h-7 w-7 rounded-full text-xs font-extrabold ${rank === 1 ? 'bg-saffron-400 text-slate-900' : rank === 2 ? 'bg-slate-300 text-slate-900' : 'bg-amber-700 text-white'}">${rank}</span>`
-          : `<span class="font-semibold text-slate-200">${rank}</span>`;
+        const rankChip = rank === null ? '<span class="text-slate-500">–</span>'
+          : rank <= 3
+            ? `<span class="inline-grid place-items-center h-7 w-7 rounded-full text-xs font-extrabold ${rank === 1 ? 'bg-saffron-400 text-slate-900' : rank === 2 ? 'bg-slate-300 text-slate-900' : 'bg-amber-700 text-white'}">${rank}</span>`
+            : `<span class="font-semibold text-slate-200">${rank}</span>`;
         return `
           <tr class="${isMe ? 'bg-brand-500/10' : 'hover:bg-ink-800/60'}">
             <td class="px-4 py-3">${rankChip}</td>
             <td class="px-4 py-3">
               <span class="font-semibold text-white">${escapeHtml(name)}</span>
               ${isMe ? '<span class="chip ml-2 bg-brand-500/20 text-brand-400">You</span>' : ''}
-              ${high ? '<span class="chip ml-2 bg-red-500/15 text-red-300" title="Far above this shift\'s usual scores">Unusually high</span>' : ''}
+              ${side ? `<span class="chip ml-2 bg-red-500/15 text-red-300">Unusually ${side}</span>` : ''}
               <span class="block text-xs text-slate-500">Roll ${escapeHtml(roll)}</span>
-              ${high ? '<span class="block text-xs text-red-300/80">Much higher than this shift\'s usual scores. Unverified, may be inaccurate.</span>' : ''}
+              ${out ? '<span class="block text-xs text-red-300/80">Far outside this shift\'s usual scores. Unverified, not counted in ranks.</span>' : ''}
               <span class="block md:hidden text-xs text-slate-400">${escapeHtml(shiftLabel(shift))}</span>
             </td>
             <td class="px-4 py-3"><span class="chip bg-ink-700 text-slate-200">${escapeHtml(category)}</span></td>
             <td class="px-4 py-3 hidden md:table-cell text-slate-300">${escapeHtml(shiftLabel(shift))}</td>
             <td class="px-4 py-3 text-right font-bold text-white">${fmt(marks)}</td>
-            <td class="px-4 py-3 text-right hidden sm:table-cell text-slate-300">${overall}</td>
+            <td class="px-4 py-3 text-right hidden sm:table-cell text-slate-300">${overall ?? '–'}</td>
           </tr>`;
       }).join('');
       $('boardMore').classList.toggle('hidden', list.length <= visibleRows);
@@ -1282,74 +1305,143 @@ LONG LIVE VCHAND
       return bins;
     }
 
-    /* ---- Possible normalization (HPRCA Z-Score / Mean-SD method) ---- */
+    /* ---- Normalization helpers (HPRCA Z-Score / Mean-SD method) ---- */
     function histSD(hist, mean) {
       let s = 0, t = 0;
       for (const k in hist) { const d = Number(k) / 100 - mean; s += d * d * hist[k]; t += hist[k]; }
       return t ? Math.sqrt(s / t) : 0;
     }
+    // Xn = (S2 / S1) * (X - Xav) + Yav
+    const normScore = (x, r, base) => (r.sd > 0 ? (base.sd / r.sd) * (x - r.mean) + base.mean : x);
 
-    // Base shift = highest average (only among shifts with enough entries)
+    /* ---- Outlier-resistant statistics (front-end only) ---- */
+    const FLAG_MIN_N = 30;   // entries needed before a shift's own quartiles are trusted
+    const SOFT_K = 1.5;      // visible "Unusually high/low" tag
+    const HARD_K = 2;        // beyond this: left out of averages, ranks and normalization
+    const INF = { lo: -Infinity, hi: Infinity };
+    let _clean = { t: null };
+    let _norm = { t: null, v: null };
+    let _pool = { t: null, list: [] };
+
+    const histMax = (h) => { let m = 0; for (const k in h) m = Math.max(m, Number(k) / 100); return m; };
+
+    function fencesFor(hist, k) {
+      const q1 = quantile(hist, 0.25), q3 = quantile(hist, 0.75), iqr = q3 - q1;
+      return iqr > 0 ? { lo: q1 - k * iqr, hi: q3 + k * iqr } : INF;
+    }
+
+    function cleanHists() {
+      if (_clean.t === snap.t) return _clean;
+      const enough = histTotal(snap.h.all) >= FLAG_MIN_N;
+      const pooled = enough
+        ? { hard: fencesFor(snap.h.all, HARD_K), soft: fencesFor(snap.h.all, SOFT_K) }
+        : { hard: INF, soft: INF };
+      const shift = {}, all = {}, cat = {}, fence = {};
+      const keep = (h, f, into) => {
+        const out = {};
+        for (const key in h) {
+          const m = Number(key) / 100;
+          if (m >= f.lo && m <= f.hi) { out[key] = h[key]; if (into) into[key] = (into[key] || 0) + h[key]; }
+        }
+        return out;
+      };
+      for (const s of SHIFTS) {
+        const h = snap.h['s:' + s.id];
+        if (!h) continue;
+        const f = histTotal(h) >= FLAG_MIN_N
+          ? { hard: fencesFor(h, HARD_K), soft: fencesFor(h, SOFT_K) }
+          : pooled;
+        fence[s.id] = f;
+        shift[s.id] = keep(h, f.hard, all);
+      }
+      for (const c of CATEGORIES) {
+        const h = snap.h['c:' + c];
+        if (h) cat[c] = keep(h, pooled.hard);
+      }
+      _clean = { t: snap.t, shift, all, cat, fence, pooled };
+      return _clean;
+    }
+
+    function isExcluded(shiftId, marks) {
+      if (!snap) return false;
+      const c = cleanHists(), f = (c.fence[shiftId] || c.pooled).hard;
+      return marks < f.lo || marks > f.hi;
+    }
+    function outlierSide(shiftId, marks) {           // 'high' | 'low' | null
+      if (!snap) return null;
+      const c = cleanHists(), f = (c.fence[shiftId] || c.pooled).soft;
+      return marks > f.hi ? 'high' : marks < f.lo ? 'low' : null;
+    }
+
     function computeNorm() {
       if (!snap) return null;
+      if (_norm.t === snap.t) return _norm.v;
+      const c = cleanHists();
       const rows = SHIFTS.map((s) => {
-        const h = snap.h['s:' + s.id];
+        const h = c.shift[s.id];
         const n = h ? histTotal(h) : 0;
         if (!n) return null;
         const mean = histMean(h);
         return { id: s.id, n, mean, sd: histSD(h, mean) };
       }).filter(Boolean);
       const pool = rows.filter((r) => r.n >= MIN_RELIABLE && r.sd > 0);
-      if (!pool.length) return null;
-      const base = pool.reduce((a, b) => (b.mean > a.mean ? b : a));
-      return { base, byShift: Object.fromEntries(rows.map((r) => [r.id, r])) };
+      let v = null;
+      if (pool.length) {
+        const base = pool.reduce((a, b) => (b.mean > a.mean ? b : a));
+        v = { base, byShift: Object.fromEntries(rows.map((r) => [r.id, r])) };
+      }
+      _norm = { t: snap.t, v };
+      return v;
     }
 
-    // Xn = (S2 / S1) * (X - Xav) + Yav
-    const normScore = (x, r, base) => (r.sd > 0 ? (base.sd / r.sd) * (x - r.mean) + base.mean : x);
-    
-
-    /* ---- Unusually-high score flag (front-end only) ---- */
-    const FLAG_K     = 1.5;  // standard outlier rule: 1.5 x IQR above the upper quartile
-    const FLAG_MIN_N = 30;   // entries needed before a shift's own median is trusted
-    let _fenceCache = { t: null, v: null, centers: {} };
-
-    function fenceInfo() {
-      if (_fenceCache.t !== snap.t) {
-        const all = snap.h.all;
-        let v = null;
-        if (all && histTotal(all) >= FLAG_MIN_N) {
-          const q1 = quantile(all, 0.25), med = quantile(all, 0.5), q3 = quantile(all, 0.75);
-          const iqr = q3 - q1;
-          if (iqr > 0) v = { med, offset: q3 + FLAG_K * iqr - med };   // distance above the median allowed
+    // All clean entries as [normalized marks, count], built once per snapshot
+    function normPool() {
+      if (_pool.t === snap.t) return _pool.list;
+      const c = cleanHists(), norm = computeNorm(), list = [];
+      for (const s of SHIFTS) {
+        const h = c.shift[s.id];
+        if (!h) continue;
+        const r = norm && norm.byShift[s.id];
+        const use = r && r.n >= MIN_RELIABLE;
+        for (const k in h) {
+          const x = Number(k) / 100;
+          list.push([use ? normScore(x, r, norm.base) : x, h[k]]);
         }
-        _fenceCache = { t: snap.t, v, centers: {} };
       }
-      return _fenceCache;
+      _pool = { t: snap.t, list };
+      return list;
     }
 
-    function isUnusuallyHigh(shiftId, marks) {
-      if (!snap) return false;
-      const c = fenceInfo();
-      if (!c.v) return false;
-      if (!(shiftId in c.centers)) {
-        const h = snap.h['s:' + shiftId];
-        c.centers[shiftId] = h && histTotal(h) >= FLAG_MIN_N ? quantile(h, 0.5) : c.v.med;
-      }
-      return marks > c.centers[shiftId] + c.v.offset;
+    // Rank among clean entries, after normalization, plus a likely range
+    function estimateRank(marks, shiftId) {
+      const c = cleanHists(), norm = computeNorm();
+      const r = norm && norm.byShift[shiftId];
+      const myNorm = r && r.n >= MIN_RELIABLE ? normScore(marks, r, norm.base) : marks;
+      let above = 0, total = 0;
+      for (const [nx, n] of normPool()) { total += n; if (nx > myNorm + 1e-9) above += n; }
+      const rank = 1 + above;
+      const rawRank = 1 + countAbove(c.all, marks);
+      const p = Math.min(1, rank / Math.max(total, 1));
+      const se = Math.sqrt(total * p * (1 - p));
+      return {
+        rank, rawRank, total,
+        lo: Math.max(1, Math.round(Math.min(rank, rawRank) - se)),
+        hi: Math.min(Math.max(total, rank), Math.round(Math.max(rank, rawRank) + se))
+      };
     }
 
     function renderDifficulty() {
       const box = $('diffRank');
       const insight = $('diffInsight');
-      const overallAvg = snap && snap.n ? snap.sum / snap.n : 0;
+      const cl = snap ? cleanHists() : null;
+      const overallAvg = cl && histTotal(cl.all) ? histMean(cl.all) : 0;
 
       const rows = SHIFTS.map((s) => {
-        const st = snap && snap.shift[s.id];
-        if (!st || !st.n) return null;
-        const hist = snap.h['s:' + s.id];
-        const avg = st.sum / st.n;
-        return { id: s.id, n: st.n, avg, delta: avg - overallAvg, median: quantile(hist, 0.5), p90: quantile(hist, 0.9) };
+        const hist = cl && cl.shift[s.id];
+        const n = hist ? histTotal(hist) : 0;
+        if (!n) return null;
+        const avg = histMean(hist);
+        return { id: s.id, n, avg, delta: avg - overallAvg, median: quantile(hist, 0.5), p90: quantile(hist, 0.9) };
       }).filter(Boolean).sort((a, b) => a.avg - b.avg);
 
       if (!rows.length) {
@@ -1397,7 +1489,8 @@ LONG LIVE VCHAND
 
     function renderDistribution() {
       const sel = $('distShift').value;
-      const hist = snap ? (sel ? snap.h['s:' + sel] : snap.h.all) : null;
+      const cl = snap ? cleanHists() : null;
+      const hist = cl ? (sel ? cl.shift[sel] : cl.all) : null;
       const total = hist ? histTotal(hist) : 0;
       const chart = $('distChart');
 
@@ -1436,19 +1529,21 @@ LONG LIVE VCHAND
 
     function renderCategories() {
       const box = $('catChart');
-      const total = snap ? CATEGORIES.reduce((a, c) => a + (snap.cat[c] || 0), 0) : 0;
+      const cc = snap ? cleanHists().cat : {};
+      const cnt = (c) => (cc[c] ? histTotal(cc[c]) : 0);
+      const total = CATEGORIES.reduce((a, c) => a + cnt(c), 0);
       if (!total) {
         box.innerHTML = '<p class="text-sm text-slate-400">No data yet.</p>';
         return;
       }
       const bar = CATEGORIES.map((c) => {
-        const n = snap.cat[c] || 0;
+        const n = cnt(c);
         return n ? `<div class="${CAT_COLORS[c]} h-full" style="width:${(n / total) * 100}%" title="${escapeHtml(c)}: ${n}"></div>` : '';
       }).join('');
 
       const legend = CATEGORIES.map((c) => {
-        const n = snap.cat[c] || 0;
-        const avg = n ? fmt(histMean(snap.h['c:' + c])) : '–';
+        const n = cnt(c);
+        const avg = n ? fmt(histMean(cc[c])) : '–';
         const isMe = mine && mine.category === c;
         return `
           <div class="rounded-lg bg-ink-950 border ${isMe ? 'border-brand-500/60' : 'border-ink-700'} p-3">
