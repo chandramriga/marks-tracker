@@ -598,6 +598,18 @@ LONG LIVE VCHAND
     const PAGE_SIZE      = 25;               // leaderboard rows revealed per click
     const SNAP_TTL_MS    = 10 * 60 * 1000;   // browsers reuse the snapshot for 10 minutes (saves reads)
     const MIN_REFRESH_MS = 2 * 60 * 1000;    // minimum gap between manual refreshes
+    // Witty labels for the top 3 ranks: proud if real, ashamed if made up
+    const TOP_LABELS = {
+  1: { tag: '👑 Topper',
+       line: 'Real? Take a bow, champion! Made up? Even this leaderboard is blushing for you. 😏',
+       hi:   'सच है तो सीना चौड़ा करो, झूठ है तो नज़रें झुकाओ।' },
+  2: { tag: '🥈 So close',
+       line: 'Real? Respect, the crown is just a few marks away. Fake? You couldn\'t even lie big enough to take gold. 😅',
+       hi:   'मेहनत की है तो गर्व करो, वरना शर्म करो!' },
+  3: { tag: '🥉 On the podium',
+       line: 'Real? Well earned, enjoy the view! Fake? Please step down before your conscience files a complaint. 🙈',
+       hi:   'असली है तो बधाई, नकली है तो भगवान भला करे!' }
+};
     const MINE_TTL_MS    = 24 * 60 * 60 * 1000;
 
     /* ------------------------------------------------------------------
@@ -1498,6 +1510,11 @@ LONG LIVE VCHAND
               ${isMe ? '<span class="chip ml-2 bg-brand-500/20 text-brand-400">You</span>' : ''}
               ${high ? '<span class="chip ml-2 bg-red-500/15 text-red-300" title="Far above this shift\'s usual scores">Unusually high</span>' : ''}
               <span class="block text-xs text-slate-500">Roll ${escapeHtml(roll)}</span>
+${rank <= 3 && TOP_LABELS[rank] ? `
+  <span class="mt-1.5 block rounded-md border border-saffron-500/30 bg-saffron-500/10 px-2.5 py-1.5 text-xs text-slate-200">
+    <strong class="text-saffron-400">${TOP_LABELS[rank].tag}</strong> · ${TOP_LABELS[rank].line}
+    <span class="block mt-0.5 text-slate-400">${TOP_LABELS[rank].hi}</span>
+  </span>` : ''}
               ${high ? '<span class="block text-xs text-red-300/80">Statistical outlier for this shift. Unverified, may be inaccurate.</span>' : ''}
               <span class="block md:hidden text-xs text-slate-400">${escapeHtml(shiftLabel(shift))}</span>
             </td>
