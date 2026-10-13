@@ -628,7 +628,14 @@ LONG LIVE VCHAND
     const escapeHtml = (str) =>
       String(str).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
     const maskRoll = (roll) => '•'.repeat(roll.length - 3) + roll.slice(-3);
-
+    const maskName = (name) =>
+      String(name).trim().split(/\s+/).map((w) => {
+        const c = [...w];  
+        if (c.length <= 1) return w;
+        const keep = c.length <= 3 ? 1 : 2;
+        return c.slice(0, keep).join('') + '•'.repeat(c.length - keep);
+  }).join(' ');
+    
     // Small localStorage helpers (failures are ignored: private mode, quota, etc.)
     const lsGet = (k) => { try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } };
     const lsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* ignore */ } };
@@ -1122,7 +1129,7 @@ LONG LIVE VCHAND
 
     async function exportPdf() {
   if (!isAdmin()) return;
-  const w = window.open('', '_blank');   // open on click so pop-up blockers allow it
+  const w = window.open('', '_blank');
   if (!w) return toast('Allow pop-ups for this site, then try again.', 'error');
   w.document.write('<p style="font-family:sans-serif">Preparing PDF…</p>');
 
@@ -1140,13 +1147,13 @@ LONG LIVE VCHAND
       qs.docs.forEach((d) => {
         const x = d.data();
         if (typeof x.marks === 'number' && isFinite(x.marks) && x.marks >= 0 && x.marks <= MAX_MARKS &&
-            SHIFT_IDS.includes(x.shift) && typeof x.name === 'string') rows.push(x);
+            SHIFT_IDS.includes(x.shift) && CATEGORIES.includes(x.category) && typeof x.name === 'string') rows.push(x);
       });
       if (qs.size < 500) break;
       last = qs.docs[qs.docs.length - 1];
     }
 
-    // 2. Per-shift mean and standard deviation (same method as the site)
+    // 2. Per-shift mean and standard deviation
     const stats = {};
     rows.forEach((r) => {
       const s = (stats[r.shift] = stats[r.shift] || { n: 0, sum: 0, sq: 0 });
@@ -1159,20 +1166,20 @@ LONG LIVE VCHAND
       s.ok = s.n >= MIN_RELIABLE && s.sd > 0;
     });
 
-    // 3. Base shift = highest average among shifts with enough entries
+    // 3. Base shift
     const pool = Object.entries(stats).filter(([, s]) => s.ok);
     if (!pool.length) throw new Error('Not enough data to normalize yet.');
     const [baseId, base] = pool.reduce((a, b) => (b[1].mean > a[1].mean ? b : a));
 
-    // 4. Normalized score: Xn = (SD_base / SD_shift) * (X - Mean_shift) + Mean_base
+    // 4. Normalized score
     rows.forEach((r) => {
       const s = stats[r.shift];
       r.raw = round2(r.marks);
-      r.estimated = s.ok;                       // false = shift too small, raw score kept
+      r.estimated = s.ok;
       r.norm = s.ok ? round2((base.sd / s.sd) * (r.marks - s.mean) + base.mean) : r.raw;
     });
 
-    // 5. Ranks (equal scores share a rank)
+    // 5. Overall ranks (equal scores share a rank)
     const assignRank = (key, out) => {
       const sorted = [...rows].sort((a, b) => b[key] - a[key]);
       let rank = 0, prev = null;
@@ -1181,17 +1188,32 @@ LONG LIVE VCHAND
     assignRank('raw', 'rankRaw');
     assignRank('norm', 'rankNorm');
 
-    // Sorted by normalized rank. Change to a.rankRaw - b.rankRaw to sort by raw rank instead.
-    rows.sort((a, b) => a.rankNorm - b.rankNorm || a.rankRaw - b.rankRaw || String(a.name).localeCompare(String(b.name)));
+    // 6. Rank within each category (by normalized score)
+    CATEGORIES.forEach((cat) => {
+      const list = rows.filter((r) => r.category === cat).sort((a, b) => b.norm - a.norm);
+      let rank = 0, prev = null;
+      list.forEach((r, i) => { if (r.norm !== prev) { rank = i + 1; prev = r.norm; } r.rankCat = rank; });
+    });
 
-    const body = rows.map((r) => `<tr>
-        <td>${r.rankNorm}</td>
-        <td>${r.rankRaw}</td>
-        <td>${escapeHtml(r.name)}</td>
-        <td>${escapeHtml(r.rollMasked || '')}</td>
-        <td class="r">${fmt(r.raw)}</td>
-        <td class="r">${fmt(r.norm)}${r.estimated ? '' : ' *'}</td>
-      </tr>`).join('');
+    // 7. Build table: General (UR) first, then EWS, OBC, SC, ST
+    const CAT_LABEL = { General: 'General (UR)', EWS: 'EWS', OBC: 'OBC', SC: 'SC', ST: 'ST' };
+    let body = '';
+    CATEGORIES.forEach((cat) => {
+      const list = rows
+        .filter((r) => r.category === cat)
+        .sort((a, b) => a.rankCat - b.rankCat || a.rankRaw - b.rankRaw || String(a.name).localeCompare(String(b.name)));
+      if (!list.length) return;
+      body += `<tr class="cat"><td colspan="7">${CAT_LABEL[cat]} · ${list.length} entries</td></tr>`;
+      body += list.map((r) => `<tr>
+          <td>${r.rankCat}</td>
+          <td>${r.rankNorm}</td>
+          <td>${r.rankRaw}</td>
+          <td>${escapeHtml(maskName(r.name))}</td>
+          <td>${escapeHtml(r.rollMasked || '')}</td>
+          <td class="r">${fmt(r.raw)}</td>
+          <td class="r">${fmt(r.norm)}${r.estimated ? '' : ' *'}</td>
+        </tr>`).join('');
+    });
 
     const today = new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' });
     const small = rows.some((r) => !r.estimated);
@@ -1206,6 +1228,7 @@ LONG LIVE VCHAND
         th, td { border:1px solid #bbb; padding:5px 7px; text-align:left; }
         th { background:#eee; }
         td.r { text-align:right; font-weight:bold; }
+        tr.cat td { background:#dbe7ff; font-weight:bold; font-size:13px; }
         thead { display:table-header-group; }
         tr { page-break-inside:avoid; }
         .note { margin-top:12px; font-size:11px; color:#555; }
@@ -1214,8 +1237,8 @@ LONG LIVE VCHAND
       <p class="meta">Himachal Exams Hub · ${rows.length} entries · Generated ${today}</p>
       <table>
         <thead><tr>
-          <th>Rank (normalized)</th><th>Rank (raw)</th><th>Candidate</th>
-          <th>Roll (masked)</th><th>Raw score</th><th>Normalized score</th>
+          <th>Category rank</th><th>Overall rank (normalized)</th><th>Overall rank (raw)</th>
+          <th>Candidate</th><th>Roll (masked)</th><th>Raw score</th><th>Normalized score</th>
         </tr></thead>
         <tbody>${body}</tbody>
       </table>
