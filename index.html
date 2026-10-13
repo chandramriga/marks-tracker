@@ -1179,20 +1179,23 @@ LONG LIVE VCHAND
       r.norm = s.ok ? round2((base.sd / s.sd) * (r.marks - s.mean) + base.mean) : r.raw;
     });
 
-    // 5. Overall ranks (equal scores share a rank)
-    const assignRank = (key, out) => {
-      const sorted = [...rows].sort((a, b) => b[key] - a[key]);
+    // 5. Ranking helper: equal scores share a rank (1, 2, 2, 4 ...)
+    const assignRank = (list, key, out) => {
+      const sorted = [...list].sort((a, b) => b[key] - a[key]);
       let rank = 0, prev = null;
-      sorted.forEach((r, i) => { if (r[key] !== prev) { rank = i + 1; prev = r[key]; } r[out] = rank; });
+      sorted.forEach((r, i) => {
+        if (r[key] !== prev) { rank = i + 1; prev = r[key]; }
+        r[out] = rank;
+      });
     };
-    assignRank('raw', 'rankRaw');
-    assignRank('norm', 'rankNorm');
 
-    // 6. Rank within each category (by normalized score)
+    // Overall ranks across everyone
+    assignRank(rows, 'raw',  'rankRaw');    // PRIMARY: raw score
+    assignRank(rows, 'norm', 'rankNorm');   // reference only
+
+    // 6. Category rank: based on RAW score
     CATEGORIES.forEach((cat) => {
-      const list = rows.filter((r) => r.category === cat).sort((a, b) => b.norm - a.norm);
-      let rank = 0, prev = null;
-      list.forEach((r, i) => { if (r.norm !== prev) { rank = i + 1; prev = r.norm; } r.rankCat = rank; });
+      assignRank(rows.filter((r) => r.category === cat), 'raw', 'rankCat');
     });
 
     // 7. Build table: General (UR) first, then EWS, OBC, SC, ST
@@ -1201,13 +1204,16 @@ LONG LIVE VCHAND
     CATEGORIES.forEach((cat) => {
       const list = rows
         .filter((r) => r.category === cat)
-        .sort((a, b) => a.rankCat - b.rankCat || a.rankRaw - b.rankRaw || String(a.name).localeCompare(String(b.name)));
+                .sort((a, b) =>
+          a.rankCat - b.rankCat ||          // raw-based category rank
+          b.norm - a.norm ||                // same raw score: higher normalized first
+          String(a.name).localeCompare(String(b.name)));
       if (!list.length) return;
       body += `<tr class="cat"><td colspan="7">${CAT_LABEL[cat]} · ${list.length} entries</td></tr>`;
       body += list.map((r) => `<tr>
           <td>${r.rankCat}</td>
-          <td>${r.rankNorm}</td>
           <td>${r.rankRaw}</td>
+          <td>${r.rankNorm}</td>
           <td>${escapeHtml(maskName(r.name))}</td>
           <td>${escapeHtml(r.rollMasked || '')}</td>
           <td class="r">${fmt(r.raw)}</td>
@@ -1237,13 +1243,13 @@ LONG LIVE VCHAND
       <p class="meta">Himachal Exams Hub · ${rows.length} entries · Generated ${today}</p>
       <table>
         <thead><tr>
-          <th>Category rank</th><th>Overall rank (normalized)</th><th>Overall rank (raw)</th>
+          <th>Category rank (raw)</th><th>Overall rank (raw)</th><th>Overall rank (normalized)</th>
           <th>Candidate</th><th>Roll (masked)</th><th>Raw score</th><th>Normalized score</th>
         </tr></thead>
         <tbody>${body}</tbody>
       </table>
       <p class="note">Normalized scores use the Z-Score (Mean and Standard Deviation) method with the highest-average shift
-        (${escapeHtml(shiftLabel(baseId))}) as the base. This is an estimate from voluntary submissions, not the official HPRCA result.
+        (${escapeHtml(shiftLabel(baseId))}) as the base. This is an estimate from voluntary submissions, not the official HPRCA result. Category rank and overall rank in the first two columns are based on raw marks. Normalized rank is shown for reference only. Candidates with equal marks share a rank.
         ${small ? '* Shift had too few entries, so the raw score is shown unchanged.' : ''}
         Marks are self-reported and unverified. Unofficial community data, not affiliated with HPRCA.</p>
       <script>window.onload = () => setTimeout(() => window.print(), 300);<\/script>
