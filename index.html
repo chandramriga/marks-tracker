@@ -438,7 +438,12 @@ LONG LIVE VCHAND
         
       </div>
 
-
+      <!-- Auto summary -->
+<div class="panel p-5 sm:p-6 border-l-4 !border-l-saffron-500">
+  <h2 class="text-lg font-bold text-white">Quick conclusion</h2>
+  <div id="summaryBox" class="mt-3 space-y-2 text-sm sm:text-base text-slate-300"></div>
+  <p class="mt-3 text-xs text-slate-500">Written automatically from the published numbers. It changes as more candidates submit.</p>
+</div>
 
       <!-- Charts -->
       <div class="grid lg:grid-cols-2 gap-6">
@@ -1287,6 +1292,7 @@ LONG LIVE VCHAND
       renderMyStanding();
       renderShiftCards();
       renderDifficulty();
+      renderSummary(); 
       renderDistribution();
       renderCategories();
       renderBoard();
@@ -1622,6 +1628,69 @@ ${rank <= 3 && TOP_LABELS[rank] ? `
       return marks > c.centers[shiftId] + c.v.offset;
     }
 
+    function renderSummary() {
+  const box = $('summaryBox');
+  if (!snap || !snap.n) {
+    box.textContent = 'The conclusion appears after the first ranking update.';
+    return;
+  }
+  const rows = SHIFTS.map((s) => {
+    const h = snap.h['s:' + s.id];
+    const n = h ? histTotal(h) : 0;
+    if (n < MIN_RELIABLE) return null;
+    const mean = histMean(h), sd = histSD(h, mean);
+    const max = snap.shift[s.id].max;
+    return { id: s.id, n, mean, sd, max,
+             median: quantile(h, 0.5),
+             zMax: sd > 0 ? (max - mean) / sd : 0 };
+  }).filter(Boolean);
+
+  if (rows.length < 2) {
+    box.textContent = 'At least two shifts need 5 or more entries before a comparison is possible.';
+    return;
+  }
+
+  const hi = (k) => rows.reduce((a, b) => (b[k] > a[k] ? b : a));
+  const lo = (k) => rows.reduce((a, b) => (b[k] < a[k] ? b : a));
+  const L = (r) => `<strong class="text-white">${escapeHtml(shiftLabel(r.id))}</strong>`;
+  const out = [];
+
+  // 1. Difficulty
+  const tough = lo('mean'), easy = hi('mean');
+  out.push(`${L(tough)} looks the toughest (average ${fmt(tough.mean)}) and ${L(easy)} the easiest (average ${fmt(easy.mean)}), a gap of ${fmt(easy.mean - tough.mean)} marks.`);
+
+  // 2. Max vs average
+  const odd = hi('zMax'), calm = lo('zMax');
+  if (odd.id !== calm.id) {
+    out.push(`${L(odd)} is the most unusual in its average-versus-maximum relationship: its top score is ${fmt(odd.zMax)} SDs above its average (${fmt(odd.max)} vs ${fmt(odd.mean)}). ${L(calm)} is the opposite, at ${fmt(calm.zMax)} SDs.` +
+      (odd.zMax >= 3.5 ? ' A gap this large is worth checking: it may be a genuine topper or a wrong entry.' : ''));
+  }
+
+  // 3. Spread
+  const wide = hi('sd'), tight = lo('sd');
+  out.push(`Marks are most spread out in ${L(wide)} (SD ${fmt(wide.sd)}) and most bunched in ${L(tight)} (SD ${fmt(tight.sd)}).`);
+
+  // 4. Skew (mean vs median)
+  const skew = rows.reduce((a, b) => (Math.abs(b.mean - b.median) > Math.abs(a.mean - a.median) ? b : a));
+  if (Math.abs(skew.mean - skew.median) >= 2) {
+    out.push(`In ${L(skew)} the average (${fmt(skew.mean)}) and median (${fmt(skew.median)}) differ noticeably, so a few extreme scores may be pulling the average.`);
+  }
+
+  // 5. Normalization
+  const norm = computeNorm();
+  if (norm) {
+    const gains = rows.map((r) => ({ r, g: norm.base.mean - r.mean })).sort((a, b) => b.g - a.g);
+    if (gains[0].g > 0.25) out.push(`If normalization is applied, ${L(gains[0].r)} gains the most for an average scorer (${gains[0].g >= 0 ? '+' : ''}${fmt(gains[0].g)}).`);
+  }
+
+  // 6. Honest caveat
+  const small = lo('n');
+  out.push(`<span class="text-slate-400">To say whether this reflects the real exam population we need many more entries; ${L(small)} has only ${small.n}. Voluntary, self-reported data can be biased toward people who scored well.</span>`);
+
+  box.innerHTML = out.map((t) => `<p>${t}</p>`).join('');
+}
+
+    
     function renderDifficulty() {
       const box = $('diffRank');
       const insight = $('diffInsight');
