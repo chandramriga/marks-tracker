@@ -363,6 +363,11 @@ LONG LIVE VCHAND
           <div>
             <h2 class="text-xl font-bold text-white">Shift difficulty</h2>
             <p class="text-sm text-slate-400">A lower average usually means a tougher paper. Each card also shows the possible effect of HPRCA's Z-Score normalization</p>
+            <p class="mt-2 flex items-center gap-2 text-xs text-slate-400">
+  <span>Toughest</span>
+  <span class="h-2 w-28 rounded-full" style="background:linear-gradient(90deg,hsl(0 75% 50%),hsl(60 75% 50%),hsl(135 75% 50%))"></span>
+  <span>Easiest</span>
+</p>
           </div>
         </div>
         <div id="shiftCards" class="grid sm:grid-cols-2 lg:grid-cols-4 gap-4"></div>
@@ -1320,101 +1325,123 @@ LONG LIVE VCHAND
         ${flagNote}`;
     }
 
-    
-    function renderShiftCards() {
-      const overallAvg = snap && snap.n ? snap.sum / snap.n : 0;
-      const norm = computeNorm();
-      const sgn = (n) => (n >= 0 ? '+' : '') + fmt(round2(n));
+function renderShiftCards() {
+  const overallAvg = snap && snap.n ? snap.sum / snap.n : 0;
+  const norm = computeNorm();
+  const sgn = (n) => (n >= 0 ? '+' : '') + fmt(round2(n));
 
-      $('shiftCards').innerHTML = SHIFTS.map((s) => {
-        const st = (snap && snap.shift[s.id]) || { n: 0, sum: 0, max: 0 };
-        const n = st.n;
-        const avg = n ? st.sum / n : 0;
-        const pct = Math.min(100, (avg / MAX_MARKS) * 100);
-        const sdHist = snap && snap.h['s:' + s.id];
-        const sd = n && sdHist ? histSD(sdHist, avg) : 0;
-      
-        
-        let badge = '<span class="chip bg-ink-700 text-slate-300">No data</span>';
-        if (n > 0 && n < MIN_RELIABLE) {
-          badge = '<span class="chip bg-ink-700 text-slate-300">Few entries</span>';
-        } else if (n >= MIN_RELIABLE) {
-          const delta = avg - overallAvg, band = MAX_MARKS * 0.03;
-          badge = delta < -band ? '<span class="chip bg-red-500/15 text-red-300">Tougher</span>'
-                : delta >  band ? '<span class="chip bg-emerald-500/15 text-emerald-300">Easier</span>'
-                                : '<span class="chip bg-saffron-500/15 text-saffron-400">Moderate</span>';
-        }
-        const avgMark = Math.min(100, (overallAvg / MAX_MARKS) * 100);
+  // Difficulty colors: toughest shift = red, easiest = green, others in between
+  const diffColor = {};
+  {
+    const ranked = SHIFTS
+      .map((s) => {
+        const st = snap && snap.shift[s.id];
+        return st && st.n >= MIN_RELIABLE ? { id: s.id, avg: st.sum / st.n } : null;
+      })
+      .filter(Boolean)
+      .sort((a, b) => a.avg - b.avg);
+    const lo = ranked.length ? ranked[0].avg : 0;
+    const hi = ranked.length ? ranked[ranked.length - 1].avg : 0;
+    ranked.forEach((r) => {
+      const t = hi > lo ? (r.avg - lo) / (hi - lo) : 0.5;
+      const hue = Math.round(t * 135);   // 0 = red, 135 = green
+      diffColor[r.id] = {
+        border: `hsl(${hue} 75% 50% / 0.55)`,
+        glow: `hsl(${hue} 75% 50% / 0.08)`,
+        bar: `hsl(${hue} 75% 50%)`
+      };
+    });
+  }
 
-        // Possible normalization block
-        let normHtml = '';
-        const r = norm && norm.byShift[s.id];
-        if (norm && r) {
-          if (r.n < MIN_RELIABLE) {
-            normHtml = '<p class="mt-4 text-xs text-slate-500">Too few entries to estimate normalization.</p>';
-          } else {
-            const isBase = r.id === norm.base.id;
-            const gain = norm.base.mean - r.mean;
-            const up = gain > 0.25, down = gain < -0.25;
-            const chip = isBase ? '<span class="chip bg-brand-500/20 text-brand-400">Base shift</span>'
-                       : up     ? '<span class="chip bg-emerald-500/15 text-emerald-300">Marks added</span>'
-                       : down   ? '<span class="chip bg-red-500/15 text-red-300">Marks reduced</span>'
-                                : '<span class="chip bg-ink-700 text-slate-300">Little change</span>';
-            const line = isBase
-              ? '<p class="mt-1.5 text-sm text-slate-300">Highest average, so this is the reference shift. Marks stay as they are.</p>'
-              : `<p class="mt-1.5 text-sm text-slate-300">Average scorer: <strong class="text-white">${fmt(r.mean)}</strong> → <strong class="text-white">${fmt(norm.base.mean)}</strong>
-                   <span class="font-semibold ${up ? 'text-emerald-300' : down ? 'text-red-300' : 'text-slate-400'}">(${sgn(gain)})</span></p>`;
+  $('shiftCards').innerHTML = SHIFTS.map((s) => {
+    const st = (snap && snap.shift[s.id]) || { n: 0, sum: 0, max: 0 };
+    const n = st.n;
+    const avg = n ? st.sum / n : 0;
+    const pct = Math.min(100, (avg / MAX_MARKS) * 100);
+    const sdHist = snap && snap.h['s:' + s.id];
+    const sd = n && sdHist ? histSD(sdHist, avg) : 0;
+    const dc = diffColor[s.id];
 
-            let mineLine = '';
-            if (mine && mine.shift === s.id) {
-              const nx = normScore(mine.marks, r, norm.base);
-              const g = nx - mine.marks;
-              mineLine = `<p class="mt-1.5 text-sm text-slate-300">Your ${fmt(mine.marks)} → <strong class="text-saffron-400">${fmt(round2(nx))}</strong>
-                <span class="font-semibold ${g > 0.005 ? 'text-emerald-300' : g < -0.005 ? 'text-red-300' : 'text-slate-400'}">(${sgn(g)})</span></p>`;
-            }
-
-            normHtml = `
-              <div class="mt-4 rounded-lg border border-ink-700 bg-ink-950 p-3">
-                <div class="flex items-center justify-between gap-2">
-                  <p class="text-xs font-semibold uppercase tracking-wide text-slate-400">Possible normalization</p>
-                  ${chip}
-                </div>
-                ${line}
-                ${mineLine}
-              </div>`;
-          }
-        }
-
-        return `
-          <article class="panel p-5">
-            <div class="flex items-start justify-between gap-2">
-              <div>
-                <h3 class="font-bold text-white">${escapeHtml(s.name)}</h3>
-                <p class="text-sm text-slate-400">${escapeHtml(s.date)}</p>
-              </div>
-              ${badge}
-            </div>
-            <div class="mt-4 flex items-end justify-between gap-2">
-              <div>
-                <p class="text-3xl font-extrabold text-white">${n ? fmt(avg) : '–'}</p>
-                <p class="text-xs text-slate-400">average marks</p>
-                <p class="mt-1 text-xs text-slate-400">Std. deviation <strong class="text-white">${n ? fmt(sd) : '–'}</strong></p>
-              </div>
-              <div class="text-right text-sm text-slate-300">
-                <p><span class="font-bold text-white">${n}</span> submission${n === 1 ? '' : 's'}</p>
-                <p class="text-slate-400">Highest ${n ? fmt(st.max) : '–'}</p>
-              </div>
-            </div>
-            <div class="relative mt-4 h-2.5 rounded-full bg-ink-950 border border-ink-700" role="img"
-                 aria-label="Average ${n ? fmt(avg) : 0} out of ${MAX_MARKS}">
-              <div class="bar-fill h-full rounded-full bg-brand-500" style="width:${pct}%"></div>
-              ${n ? `<span class="absolute -top-1 w-0.5 bg-saffron-400" style="left:${avgMark}%;height:18px" title="All-shift average"></span>` : ''}
-            </div>
-            <p class="mt-2 text-xs text-slate-500">Orange tick: average across all shifts</p>
-            ${normHtml}
-          </article>`;
-      }).join('');
+    let badge = '<span class="chip bg-ink-700 text-slate-300">No data</span>';
+    if (n > 0 && n < MIN_RELIABLE) {
+      badge = '<span class="chip bg-ink-700 text-slate-300">Few entries</span>';
+    } else if (n >= MIN_RELIABLE) {
+      const delta = avg - overallAvg, band = MAX_MARKS * 0.03;
+      badge = delta < -band ? '<span class="chip bg-red-500/15 text-red-300">Tougher</span>'
+            : delta >  band ? '<span class="chip bg-emerald-500/15 text-emerald-300">Easier</span>'
+                            : '<span class="chip bg-saffron-500/15 text-saffron-400">Moderate</span>';
     }
+    const avgMark = Math.min(100, (overallAvg / MAX_MARKS) * 100);
+
+    // Possible normalization block
+    let normHtml = '';
+    const r = norm && norm.byShift[s.id];
+    if (norm && r) {
+      if (r.n < MIN_RELIABLE) {
+        normHtml = '<p class="mt-4 text-xs text-slate-500">Too few entries to estimate normalization.</p>';
+      } else {
+        const isBase = r.id === norm.base.id;
+        const gain = norm.base.mean - r.mean;
+        const up = gain > 0.25, down = gain < -0.25;
+        const chip = isBase ? '<span class="chip bg-brand-500/20 text-brand-400">Base shift</span>'
+                   : up     ? '<span class="chip bg-emerald-500/15 text-emerald-300">Marks added</span>'
+                   : down   ? '<span class="chip bg-red-500/15 text-red-300">Marks reduced</span>'
+                            : '<span class="chip bg-ink-700 text-slate-300">Little change</span>';
+        const line = isBase
+          ? '<p class="mt-1.5 text-sm text-slate-300">Highest average, so this is the reference shift. Marks stay as they are.</p>'
+          : `<p class="mt-1.5 text-sm text-slate-300">Average scorer: <strong class="text-white">${fmt(r.mean)}</strong> → <strong class="text-white">${fmt(norm.base.mean)}</strong>
+               <span class="font-semibold ${up ? 'text-emerald-300' : down ? 'text-red-300' : 'text-slate-400'}">(${sgn(gain)})</span></p>`;
+
+        let mineLine = '';
+        if (mine && mine.shift === s.id) {
+          const nx = normScore(mine.marks, r, norm.base);
+          const g = nx - mine.marks;
+          mineLine = `<p class="mt-1.5 text-sm text-slate-300">Your ${fmt(mine.marks)} → <strong class="text-saffron-400">${fmt(round2(nx))}</strong>
+            <span class="font-semibold ${g > 0.005 ? 'text-emerald-300' : g < -0.005 ? 'text-red-300' : 'text-slate-400'}">(${sgn(g)})</span></p>`;
+        }
+
+        normHtml = `
+          <div class="mt-4 rounded-lg border border-ink-700 bg-ink-950 p-3">
+            <div class="flex items-center justify-between gap-2">
+              <p class="text-xs font-semibold uppercase tracking-wide text-slate-400">Possible normalization</p>
+              ${chip}
+            </div>
+            ${line}
+            ${mineLine}
+          </div>`;
+      }
+    }
+
+    return `
+      <article class="panel p-5 border-t-4" style="${dc ? `border-color:${dc.border}; border-top-color:${dc.bar}; background-image:linear-gradient(180deg, ${dc.glow}, transparent 55%)` : ''}">
+        <div class="flex items-start justify-between gap-2">
+          <div>
+            <h3 class="font-bold text-white">${escapeHtml(s.name)}</h3>
+            <p class="text-sm text-slate-400">${escapeHtml(s.date)}</p>
+          </div>
+          ${badge}
+        </div>
+        <div class="mt-4 flex items-end justify-between gap-2">
+          <div>
+            <p class="text-3xl font-extrabold text-white">${n ? fmt(avg) : '–'}</p>
+            <p class="text-xs text-slate-400">average marks</p>
+            <p class="mt-1 text-xs text-slate-400">Std. deviation <strong class="text-white">${n ? fmt(sd) : '–'}</strong></p>
+          </div>
+          <div class="text-right text-sm text-slate-300">
+            <p><span class="font-bold text-white">${n}</span> submission${n === 1 ? '' : 's'}</p>
+            <p class="text-slate-400">Highest ${n ? fmt(st.max) : '–'}</p>
+          </div>
+        </div>
+        <div class="relative mt-4 h-2.5 rounded-full bg-ink-950 border border-ink-700" role="img"
+             aria-label="Average ${n ? fmt(avg) : 0} out of ${MAX_MARKS}">
+          <div class="bar-fill h-full rounded-full ${dc ? '' : 'bg-brand-500'}" style="width:${pct}%${dc ? `;background:${dc.bar}` : ''}"></div>
+          ${n ? `<span class="absolute -top-1 w-0.5 bg-saffron-400" style="left:${avgMark}%;height:18px" title="All-shift average"></span>` : ''}
+        </div>
+        <p class="mt-2 text-xs text-slate-500">Orange tick: average across all shifts</p>
+        ${normHtml}
+      </article>`;
+  }).join('');
+}
 
     function renderBoard() {
       const cat = $('filterCategory').value;
