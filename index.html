@@ -1089,7 +1089,7 @@ LONG LIVE VCHAND
     $('rebuildBtn').addEventListener('click', () => runPublish(true));
 
 
-    async function exportPdf() {
+ async function exportPdf() {
   if (!isAdmin()) return;
   const w = window.open('', '_blank');
   if (!w) return toast('Allow pop-ups for this site, then try again.', 'error');
@@ -1166,18 +1166,19 @@ LONG LIVE VCHAND
     CATEGORIES.forEach((cat) => {
       const list = rows
         .filter((r) => r.category === cat)
-                .sort((a, b) =>
+        .sort((a, b) =>
           a.rankCat - b.rankCat ||          // raw-based category rank
           b.norm - a.norm ||                // same raw score: higher normalized first
           String(a.name).localeCompare(String(b.name)));
       if (!list.length) return;
-      body += `<tr class="cat"><td colspan="7">${CAT_LABEL[cat]} · ${list.length} entries</td></tr>`;
+      body += `<tr class="cat"><td colspan="8">${CAT_LABEL[cat]} · ${list.length} entries</td></tr>`;
       body += list.map((r) => `<tr>
           <td>${r.rankCat}</td>
           <td>${r.rankRaw}</td>
           <td>${r.rankNorm}</td>
-          <td>${escapeHtml(maskName(r.name))}</td>
+          <td>${escapeHtml(r.name)}</td>
           <td>${escapeHtml(r.rollMasked || '')}</td>
+          <td>${escapeHtml(shiftLabel(r.shift))}</td>
           <td class="r">${fmt(r.raw)}</td>
           <td class="r">${fmt(r.norm)}${r.estimated ? '' : ' *'}</td>
         </tr>`).join('');
@@ -1206,7 +1207,7 @@ LONG LIVE VCHAND
       <table>
         <thead><tr>
           <th>Category rank (raw)</th><th>Overall rank (raw)</th><th>Overall rank (normalized)</th>
-          <th>Candidate</th><th>Roll (masked)</th><th>Raw score</th><th>Normalized score</th>
+          <th>Candidate</th><th>Roll (masked)</th><th>Shift</th><th>Raw score</th><th>Normalized score</th>
         </tr></thead>
         <tbody>${body}</tbody>
       </table>
